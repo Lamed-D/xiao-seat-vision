@@ -58,9 +58,15 @@ services:
     image: xiao-seat-vision/dashboard:local
     restart: unless-stopped
     ports:
+      # Keep 127.0.0.1: with the tokens below the page needs no login (incl. developer
+      # mode data), so it must only be reachable from this PC.
       - "127.0.0.1:${DASHBOARD_PORT:-8080}:80"
     environment:
       DASHBOARD_API_URL: ${DASHBOARD_API_URL:-}
+      # Optional token proxy: when set, the container adds the tokens server-side and
+      # the browser needs none. Leave empty to require tokens in the dashboard settings.
+      DASHBOARD_VIEWER_TOKEN: ${DASHBOARD_VIEWER_TOKEN:-}
+      DASHBOARD_ADMIN_TOKEN: ${DASHBOARD_ADMIN_TOKEN:-}
 
   video-feeder:
     profiles: ["test-video"]

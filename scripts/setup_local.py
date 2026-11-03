@@ -165,6 +165,9 @@ def main() -> None:
         env_set(sec, key, secrets.token_hex(32))
     bridge_token = env_get(sec, "BRIDGE_API_TOKENS").split(",")[0]
     say("supabase/.env.secrets ready (dashboard viewer/admin tokens are in this file)")
+    # Dashboard token proxy (127.0.0.1 only): the page works without typing tokens.
+    env_set(env, "DASHBOARD_VIEWER_TOKEN", env_get(sec, "DASHBOARD_VIEWER_TOKENS").split(",")[0])
+    env_set(env, "DASHBOARD_ADMIN_TOKEN", env_get(sec, "DASHBOARD_ADMIN_TOKENS").split(",")[0])
 
     # 7. bridge/.env
     benv = ROOT / "bridge" / ".env"

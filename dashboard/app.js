@@ -30,11 +30,31 @@
   let settings = loadSettings();
   let streaming = false;
 
+  const CFG = window.XSV_CONFIG || {};
+
+  // Token-less mode: the dashboard container proxies /api/dashboard and adds the
+  // tokens server-side (only when it was started with them, see compose.yaml).
+  // A token typed into the settings always takes precedence (direct call).
+  function useProxy() {
+    return !!CFG.proxy && !settings.viewerToken;
+  }
+  function adminAvailable() {
+    return useProxy() ? !!CFG.proxyAdmin : !!settings.adminToken;
+  }
+
   async function api(view, token) {
-    const url = new URL(settings.apiUrl);
-    url.searchParams.set("view", view);
-    if (settings.testData) url.searchParams.set("data", "test");
-    const r = await fetch(url, { headers: { "x-dashboard-token": token } });
+    let r;
+    if (useProxy()) {
+      const url = new URL("/api/dashboard", location.origin);
+      url.searchParams.set("view", view);
+      if (settings.testData) url.searchParams.set("data", "test");
+      r = await fetch(url);
+    } else {
+      const url = new URL(settings.apiUrl);
+      url.searchParams.set("view", view);
+      if (settings.testData) url.searchParams.set("data", "test");
+      r = await fetch(url, { headers: { "x-dashboard-token": token } });
+    }
     if (!r.ok) throw new Error(`${view}: HTTP ${r.status}`);
     return r.json();
   }
@@ -177,14 +197,14 @@
 
   async function refresh() {
     $("error").textContent = "";
-    if (!settings.apiUrl || !settings.viewerToken) {
+    if (!useProxy() && (!settings.apiUrl || !settings.viewerToken)) {
       $("error").textContent = "설정에서 API URL과 조회 토큰을 입력하세요.";
       return;
     }
     try {
       const summary = await api("summary", settings.viewerToken);
       let debug = null;
-      if (settings.devMode && settings.adminToken) {
+      if (settings.devMode && adminAvailable()) {
         try {
           debug = await api("debug", settings.adminToken); // fetched only in developer mode
         } catch (e) {
