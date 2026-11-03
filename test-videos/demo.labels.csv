@@ -1,0 +1,4 @@
+start_s,end_s,seat_id,state
+0,10,seat_01,occupied
+5,20,seat_02,occupied
+15,25,seat_03,occupied
