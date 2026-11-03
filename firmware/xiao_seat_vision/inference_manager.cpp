@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <string.h>
 
+#include "app_config.h"  // config.h may define XSV_EI_MODEL_HEADER (local, git-ignored)
 #include "model_config.h"
 
 #ifndef XSV_PERSON_LABEL
@@ -31,7 +32,7 @@ __attribute__((unused)) void cropView(int srcW, int srcH, int dstW, int dstH, fl
 
 #ifdef XSV_EI_MODEL_HEADER
 // ---------------------------------------------------------------------------
-// Edge Impulse model integrated (XSV_EI_MODEL_HEADER defined in model_config.h)
+// Edge Impulse model integrated (XSV_EI_MODEL_HEADER defined in config.h or model_config.h)
 // ---------------------------------------------------------------------------
 #include XSV_EI_MODEL_HEADER
 
@@ -71,7 +72,7 @@ struct PsramBuffer {
   PsramBuffer& operator=(const PsramBuffer&) = delete;
 };
 
-SeatState labelToState(const char* label) {
+__attribute__((unused)) SeatState labelToState(const char* label) {  // classification models only
   if (strcmp(label, "empty") == 0) return SeatState::Empty;
   if (strcmp(label, "occupied") == 0) return SeatState::Occupied;
   return SeatState::Unknown;
@@ -199,7 +200,7 @@ ModelInfo s_info = {"none", 0, 0, "none", 0, 0, 0.0f, 1.0f, 0.0f, 1.0f};
 namespace inference {
 
 bool begin() {
-  Serial.println("[infer] Edge Impulse model NOT integrated (XSV_EI_MODEL_HEADER not set in model_config.h)");
+  Serial.println("[infer] Edge Impulse model NOT integrated (XSV_EI_MODEL_HEADER not set in config.h/model_config.h)");
   Serial.println("[infer] -> no classification is performed and no seat events are published");
   return false;
 }
