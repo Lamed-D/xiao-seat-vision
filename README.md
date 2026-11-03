@@ -215,7 +215,22 @@ xiao-seat-vision/
 - `[camera] init failed` → 카메라 확장 보드가 제대로 끼워졌는지 확인 (보드 전원 분리 후)
 - 시리얼 모니터 입력창에 `s` 입력 → 상태, `h` → 도움말
 
-**카메라 사진 저장해 보기** (화각·초점 확인, 나중에 AI 학습 데이터로도 사용)
+**브라우저로 카메라 실시간 확인 (추천, Wi-Fi·Docker 불필요)**
+```bash
+# Arduino IDE의 시리얼 모니터를 먼저 닫으세요 (포트는 한 프로그램만 사용 가능)
+pip install pyserial
+python firmware/tools/camera_viewer.py COM5
+# → 브라우저에서 http://127.0.0.1:8000
+```
+- 화면이 USB로 계속 갱신됩니다(초당 몇 장). 해상도·프레임 크기·FPS 표시
+- **점검 결과** 칸이 PSRAM 용량, 카메라 센서(OV2640/OV3660), 축소 모드 여부, `FB-OVF` 발생 여부를 자동으로 판정
+- `seats_config.h`의 좌석 ROI를 화면 위에 겹쳐 보여줘 좌석 배치를 바로 맞출 수 있음
+- **사진 저장** 버튼 → `snapshots/` 폴더 (Edge Impulse 학습 데이터로도 사용)
+- 뷰어를 켜 둔 동안에는 Arduino IDE 업로드가 안 됩니다. 업로드 전에 뷰어를 종료하세요(Ctrl+C).
+- Windows의 Docker Desktop은 USB 시리얼 포트를 컨테이너로 넘길 수 없어서 이 도구는 PC에서 직접 실행합니다.
+  Wi-Fi 설정 후에는 보드 웹 스트리밍(12단계)과 대시보드로도 볼 수 있습니다.
+
+**카메라 사진 저장해 보기** (여러 장을 일정 간격으로 저장할 때)
 ```bash
 # Arduino IDE의 시리얼 모니터를 먼저 닫으세요 (포트는 한 프로그램만 사용 가능)
 pip install pyserial

@@ -8,24 +8,33 @@ usage:  pip install pyserial
         python firmware/tools/capture_snapshot.py COM5 --count 20 --interval 2 --out dataset/empty
 
 Close the Arduino IDE Serial Monitor first (only one program can open the port).
+For a live browser view use camera_viewer.py.
 """
+
+from __future__ import annotations
 
 import argparse
 import base64
 import time
 from pathlib import Path
+from typing import Callable
 
 import serial  # pyserial
 
 
-def capture(port: serial.Serial, timeout_s: float = 10.0) -> tuple[bytes, int, int]:
-    port.reset_input_buffer()
+def capture(
+    port: serial.Serial,
+    timeout_s: float = 10.0,
+    on_log: Callable[[str], None] | None = None,
+) -> tuple[bytes, int, int]:
+    """Request one frame ('c') and return (jpeg, width, height).
+    Other firmware log lines seen meanwhile are passed to on_log."""
     port.write(b"c")
     deadline = time.monotonic() + timeout_s
     header = None
     lines: list[str] = []
     while time.monotonic() < deadline:
-        line = port.readline().decode("ascii", errors="ignore").strip()
+        line = port.readline().decode("ascii", errors="replace").strip()
         if not line:
             continue
         if line.startswith("-----BEGIN JPEG"):
@@ -39,8 +48,11 @@ def capture(port: serial.Serial, timeout_s: float = 10.0) -> tuple[bytes, int, i
             return data, int(header[3]), int(header[4])
         elif header:
             lines.append(line)
-        elif "[snapshot] capture failed" in line:
-            raise RuntimeError("device reported capture failure")
+        else:
+            if on_log:
+                on_log(line)
+            if "[snapshot] capture failed" in line:
+                raise RuntimeError("device reported capture failure")
     raise TimeoutError("no snapshot received (is the firmware running? serial monitor closed?)")
 
 
@@ -56,6 +68,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     with serial.Serial(args.port, 115200, timeout=1) as port:
         time.sleep(0.5)
+        port.reset_input_buffer()
         for i in range(args.count):
             jpeg, w, h = capture(port)
             path = out / f"{time.strftime('%Y%m%d-%H%M%S')}-{i:04d}.jpg"
