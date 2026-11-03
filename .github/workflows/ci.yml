@@ -1,0 +1,184 @@
+name: xiao-seat-vision CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match the Arduino IDE board package used for development (Boards Manager:
+  # "esp32 by Espressif Systems"). Verified locally: 3.3.12.
+  ESP32_CORE_VERSION: "3.3.12"
+  ARDUINO_CLI_VERSION: "1.5.1"
+  # XIAO ESP32S3 Sense: 8 MB flash, 8 MB octal PSRAM, USB CDC on boot (board defaults
+  # for USBMode/CDCOnBoot are Hardware CDC / Enabled).
+  FQBN: "esp32:esp32:XIAO_ESP32S3:PSRAM=opi,FlashSize=8M,PartitionScheme=default_8MB,USBMode=hwcdc,CDCOnBoot=default"
+
+jobs:
+  firmware:
+    name: Firmware (Arduino CLI, esp32 core)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Arduino CLI ${{ env.ARDUINO_CLI_VERSION }}
+        run: |
+          curl -fsSL "https://downloads.arduino.cc/arduino-cli/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz" \
+            | tar -xz -C /usr/local/bin arduino-cli
+          arduino-cli version
+
+      - name: Cache Arduino data (cores/tools)
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-esp32-${{ env.ESP32_CORE_VERSION }}
+
+      - name: Install ESP32 core ${{ env.ESP32_CORE_VERSION }}
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
+          arduino-cli core list
+
+      - name: Detect Edge Impulse model library
+        id: model
+        run: |
+          # Exported Edge Impulse Arduino library zip committed at firmware/ei-model/*.zip
+          zip=$(ls firmware/ei-model/*.zip 2>/dev/null | head -n1 || true)
+          if [ -n "$zip" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compile sketch (model NOT integrated)
+        run: |
+          arduino-cli compile --fqbn "$FQBN" --warnings default \
+            --output-dir build/no-model firmware/xiao_seat_vision
+          {
+            echo "### Firmware build"
+            echo "- esp32 core: \`${ESP32_CORE_VERSION}\`, FQBN: \`${FQBN}\`"
+            echo "- **Edge Impulse model: NOT integrated** - inference returns model_not_integrated; no seat events."
+            echo "- Compile success does **not** validate camera, AI inference or MQTT on hardware."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compile sketch WITH Edge Impulse model
+        if: steps.model.outputs.present == 'true'
+        run: |
+          arduino-cli config set library.enable_unsafe_install true
+          arduino-cli lib install --zip-path "${{ steps.model.outputs.zip }}"
+          header=$(unzip -Z1 "${{ steps.model.outputs.zip }}" | grep -E '_inferencing\.h$' | head -n1 | xargs basename)
+          echo "model header: $header"
+          arduino-cli compile --fqbn "$FQBN" --warnings default \
+            --build-property "compiler.cpp.extra_flags=-DXSV_EI_MODEL_HEADER=\"${header}\"" \
+            --output-dir build/with-model firmware/xiao_seat_vision
+          echo "- **Edge Impulse model integrated** (\`${header}\`): compiled. On-device accuracy/speed still needs hardware testing." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Model build skipped
+        if: steps.model.outputs.present != 'true'
+        run: echo "- Model build skipped (no firmware/ei-model/*.zip)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32-${{ env.ESP32_CORE_VERSION }}-${{ github.sha }}
+          path: |
+            build/**/*.bin
+            build/**/*.elf
+          if-no-files-found: error
+
+  firmware-logic:
+    name: Firmware logic unit tests (host g++)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh firmware/tests/run.sh
+
+  bridge:
+    name: Python bridge (pytest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r bridge/requirements-dev.txt
+      - run: python -m pytest -q bridge/tests
+
+  video-feeder:
+    name: Video feeder (pytest)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r video_feeder/requirements-dev.txt
+      - run: python -m pytest -q video_feeder/tests
+
+  dashboard:
+    name: Dashboard view-model tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test dashboard/
+
+  supabase:
+    name: Supabase (Edge Functions + migrations)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno check log-detection/index.ts device-status/index.ts ingest-snapshot/index.ts dashboard-api/index.ts
+      - run: deno test --allow-env tests/
+      - name: Migration test (PostgreSQL 15 container, no Supabase project)
+        working-directory: .
+        run: sh supabase/tests/run_migration_tests.sh
+
+  docker:
+    name: Docker compose + MQTT integration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build feeder image
+        run: docker build -q -t xiao-seat-vision/video-feeder:ci video_feeder
+      - name: Integration test (mosquitto TLS/auth/ACL -> bridge -> mock functions)
+        run: bash tests/integration/run.sh
+
+  commit-messages:
+    name: Conventional Commits
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commit messages and PR title
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          git log --format='%s' "$BASE..$HEAD" > /tmp/subjects.txt
+          echo "$PR_TITLE" > /tmp/pr-title.txt
+          python3 scripts/check_commits.py /tmp/subjects.txt /tmp/pr-title.txt
