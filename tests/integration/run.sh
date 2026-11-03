@@ -115,7 +115,7 @@ echo "--- dashboard"
 compose up -d --wait dashboard
 dash_get() { docker exec "$(compose ps -q dashboard)" python -c "import sys,urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000'+sys.argv[1]).read().decode())" "$1"; }
 check "dashboard (FastAPI) serves index on 127.0.0.1 only" "dash_get / | grep -q '좌석 감지' && compose port dashboard 8000 | grep -q '^127.0.0.1:'"
-check "dashboard config.js + healthz" "dash_get /config.js | grep -q 'XSV_CONFIG' && dash_get /healthz | grep -q '\"status\": \"ok\"'"
+check "dashboard config.js + healthz" "dash_get /config.js | grep -q 'XSV_CONFIG' && dash_get /healthz | grep -Eq '\"status\": ?\"ok\"'"
 
 echo "--- persistence: event published while bridge is down"
 compose stop mqtt-bridge >/dev/null
