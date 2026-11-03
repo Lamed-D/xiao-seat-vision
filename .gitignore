@@ -47,3 +47,7 @@ test-videos/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- datasets (downloaded / collected images) ----
+datasets/
+snapshots/
