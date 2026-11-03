@@ -25,7 +25,15 @@ Issues found and fixed on hardware:
   `cam_hal: FB-OVF`. Fix: Tools → PSRAM → OPI PSRAM (build size 1,118,7xx B = PSRAM off,
   1,123,8xx B = PSRAM on). Firmware now also uses JPEG quality 15 (QVGA) / 30 (fallback).
 
-Not yet tested on hardware: Wi-Fi, MQTT/TLS, LWT, streaming, TEST_VIDEO input, Edge Impulse
+### Network — 2026-11-03
+`scripts/setup_local.py` (certs with SAN 172.16.139.140 / PC-LAMED, users, env files), `docker compose up`:
+mosquitto / mqtt-bridge / dashboard healthy. Firmware with `config.h` uploaded via arduino-cli:
+- [x] Wi-Fi connected (device IP 172.16.139.18, RSSI -68 dBm)
+- [x] MQTT over TLS with CA + hostname verification: `[mqtt] connected`, broker log `New client connected ... as xiao-01`
+- [x] Bridge received the retained `online` status; forwarding returns HTTP 404 until the Edge Functions are deployed (message kept and retried)
+- Heap after Wi-Fi/TLS: free ~162 KB, max block ~117 KB; PSRAM free ~8.0 MB
+
+Not yet tested on hardware: LWT offline, broker/Wi-Fi outage recovery, streaming, TEST_VIDEO input, Edge Impulse
 inference, multi-seat detection, long-run stability → [hardware-test.md](hardware-test.md).
 
 ## Software — 2026-11-03 (local machine)
@@ -38,10 +46,10 @@ inference, multi-seat detection, long-run stability → [hardware-test.md](hardw
 | Firmware logic (occupancy, seat mapper) | `sh firmware/tests/run.sh` (gcc:14 container) | ✅ 42 checks, 0 failures |
 | Bridge | `pytest bridge/tests` | ✅ 33 passed |
 | Video feeder | `pytest video_feeder/tests` (python:3.12 container) | ✅ 4 passed |
-| Dashboard view model | `node --test dashboard/` | ✅ 4 passed |
+| Dashboard view model | `node --test dashboard/viewmodel.test.js` | ✅ 4 passed |
 | Edge Functions | `deno fmt --check && deno lint && deno check && deno test` | ✅ 15 passed |
 | DB migrations | `sh supabase/tests/run_migration_tests.sh` (PostgreSQL 15) | ✅ all checks passed |
 | Docker integration | `bash tests/integration/run.sh` | ✅ 14/14 (TLS/SAN, auth, ACL, bridge, duplicates, persistence, dashboard health) |
 | Commit messages | `scripts/check_commits.py` | ✅ all commits conform |
 | Supabase deployment | — | ⏳ not done (no project credentials here) |
-| GitHub Actions run | — | ⏳ not run yet (branch not pushed) |
+| GitHub Actions run | `feat/initial-mvp` @ 5104621 | ✅ all jobs green ([run 41572132643](https://github.com/Lamed-D/xiao-seat-vision/actions/runs/41572132643)); Docker integration first failed on Linux only, reproduced with docker-in-docker and fixed |
