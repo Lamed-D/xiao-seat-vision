@@ -20,7 +20,7 @@
 > | Supabase (테이블·Edge Function 4개·비밀값) | ✅ 배포됨, 인증(401/403) 확인 |
 > | 대시보드 (토큰 없이 로컬 조회, 개발자 모드 포함) | ✅ 확인됨 |
 > | GitHub Actions CI | ✅ 전체 통과 |
-> | **AI 모델 (Edge Impulse)** | ❌ **아직 없음** — 모델을 넣기 전에는 좌석 판단·이벤트 전송을 하지 않습니다(가짜 결과 없음). 모의 데이터·업로드 스크립트는 준비됨 |
+> | **AI 모델 (Edge Impulse FOMO)** | ✅ **보드에서 실행 확인** (추론 122 ms, 3분 연속 크래시 0) — 단, 지금은 **모의 데이터(거리 보행자)** 모델이라 오탐이 많음. 실제 설치 위치 사진으로 재학습 필요 |
 > | 스트리밍·테스트 영상·LWT·장애 복구 | ⏳ 직접 확인 필요 → [하드웨어 체크리스트](docs/hardware-test.md) |
 >
 > "CI 통과 = 컴파일 성공"이며, 보드에서 실제로 동작함을 뜻하지 않습니다.
@@ -447,6 +447,17 @@ static const SeatRoi kSeats[] = {
 ---
 
 ## 10. AI 모델 만들기·넣기 (Edge Impulse)
+
+> **⚡ 자동 방법 (권장)**: `.env`에 Edge Impulse **Admin** API 키(`EI_API_KEY`)를 넣고
+> ```bash
+> python scripts/edge_impulse.py upload <사진폴더>   # 사진 + bounding_boxes.labels
+> python scripts/edge_impulse.py train               # FOMO 96x96 int8 학습, F1 출력
+> python scripts/edge_impulse.py deploy              # firmware/ei-model/xiao-seat-vision-person.zip
+> ```
+> 그다음 zip을 Arduino IDE에 추가하고 `config.h`에 `#define XSV_EI_MODEL_HEADER "xiao-seat-vision_inferencing.h"`를 넣어 업로드합니다.
+> `deploy`는 esp32 코어 3.3.x에서 확인된 ESP-NN 메모리 문제를 피하도록 TFLite 엔진 + 텐서 메모리 2배로 자동 수정합니다
+> (EON 기본 내보내기를 그대로 쓰면 `CORRUPT HEAP`으로 재부팅이 반복됩니다 → [docs/edge-impulse.md](docs/edge-impulse.md)).
+> 아래는 같은 작업을 Edge Impulse 웹 화면에서 수동으로 하는 방법입니다(수동으로 받은 zip도 같은 수정이 필요).
 
 1. **데이터 모으기**: 실제 설치 위치에서 `capture_snapshot.py`로 사진 수백 장 (빈 좌석, 1~N명, 조명 변화, 가방만 있는 경우 등)
 2. Edge Impulse → 새 프로젝트 → **Object detection** → 사진 업로드 → 사람마다 **`person`** 박스 라벨링
