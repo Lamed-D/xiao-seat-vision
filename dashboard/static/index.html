@@ -64,14 +64,6 @@
         </aside>
       </div>
 
-      <section id="stream-section" class="panel" hidden>
-        <div class="panel-head">
-          <h2>실시간 영상</h2>
-          <button id="stream-toggle" class="btn">스트리밍 켜기</button>
-        </div>
-        <p class="muted small">스트리밍은 장치 화면 확인용 보조 기능이며 좌석 감지는 항상 계속됩니다.</p>
-        <img id="stream" class="stream" alt="" hidden>
-      </section>
     </div>
 
     <!-- ② 이벤트 로그 -->
@@ -90,7 +82,43 @@
       </section>
     </div>
 
-    <!-- Developer mode panels are created only when developer mode is ON (see app.js). -->
+    <!-- 테스트 모드: developer mode only. Persistent (not re-rendered every refresh). -->
+    <section id="devtools" class="panel dev devtools" hidden>
+      <div class="panel-head"><h2>테스트 모드 <span class="muted small">(개발자)</span></h2><span id="dev-status" class="muted small"></span></div>
+      <div class="devtools-grid">
+        <div class="tool">
+          <b>카메라 실시간 영상</b>
+          <p class="muted small">ESP32 화면 확인용. 켜도 좌석 감지는 계속됩니다(추론 주기 1초 → 2초).</p>
+          <button id="cam-toggle" class="btn">카메라 켜기</button>
+          <img id="cam-stream" class="stream" alt="카메라 실시간 영상" hidden>
+        </div>
+        <div class="tool">
+          <b>테스트 영상</b>
+          <p class="muted small">test-videos의 영상을 카메라 대신 보드에 넣어 실제 AI로 판단합니다.</p>
+          <div id="tv-status" class="muted small">상태 확인 중</div>
+          <div class="btn-row">
+            <button class="btn" data-tv="play">▶ 재생</button>
+            <button class="btn ghost" data-tv="pause">⏸ 일시정지</button>
+            <button class="btn ghost" data-tv="stop">⏹ 정지</button>
+          </div>
+        </div>
+        <div class="tool">
+          <b>테스트 이미지 전송</b>
+          <p class="muted small">사진을 보드로 보내 추론 → MQTT → Supabase 저장 → 이벤트 로그(테스트)까지 확인합니다.</p>
+          <input id="ti-file" type="file" accept="image/*">
+          <button id="ti-send" class="btn">보내기</button>
+          <pre id="ti-result" class="small" hidden></pre>
+        </div>
+        <div class="tool">
+          <b>테스트 데이터</b>
+          <p class="muted small">테스트로 만든 기록은 실제 기록과 따로 저장됩니다(is_test).</p>
+          <button id="test-data-toggle" class="btn ghost">테스트 데이터 보기: OFF</button>
+          <button class="btn ghost" data-goto="events">이벤트 로그 열기</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Developer mode data panel is created only when developer mode is ON (see app.js). -->
     <div id="dev-root"></div>
   </main>
 
@@ -120,14 +148,8 @@
       <label class="check"><input name="testData" type="checkbox"> 테스트 영상 데이터 보기</label>
 
       <fieldset>
-        <legend>실시간 스트리밍 (선택)</legend>
-        <label>ESP32 주소 <input name="esp32Url" type="url" placeholder="http://192.168.0.42"></label>
-        <label>ESP32 웹 토큰 <input name="esp32Token" type="password" autocomplete="off"></label>
-      </fieldset>
-
-      <fieldset>
         <legend>개발자</legend>
-        <label class="check"><input name="devMode" type="checkbox"> 개발자 모드</label>
+        <label class="check"><input name="devMode" type="checkbox"> 개발자 모드 (상세 데이터 + 테스트 모드)</label>
         <label>관리자 토큰 (개발자 데이터용)
           <input name="adminToken" type="password" autocomplete="off" placeholder="비워두면 이 PC의 서버 토큰을 자동 사용">
         </label>

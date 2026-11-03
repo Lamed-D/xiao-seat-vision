@@ -12,8 +12,6 @@
     adminToken: "",
     devMode: false, // must stay OFF by default
     testData: false,
-    esp32Url: "",
-    esp32Token: "",
   };
   const REFRESH_MS = 10000;
 
@@ -26,7 +24,8 @@
     },
   };
   let settings = { ...DEFAULTS, ...store.get("xsv-settings", {}) };
-  let streaming = false;
+  let camOn = false;
+  let devPoll = null;
   let lastFeed = null;
   let lastSeenEvent = store.get("xsv-last-seen-event", null);
   // #events / #overview in the URL selects the tab (shareable link); else last used tab.
@@ -384,43 +383,130 @@
     }
   }
 
-  // ---------------------------------------------------------------- streaming
-  function streamUrl() {
-    const u = new URL(settings.esp32Url);
-    return `${u.protocol}//${u.hostname}:81/stream?token=${encodeURIComponent(settings.esp32Token)}&t=${Date.now()}`;
+  // ---------------------------------------------------------------- 테스트 모드 (developer)
+  // Device/feeder calls go through the dashboard server (/api/dev/*); no tokens in the browser.
+  async function devCall(method, path, body, type) {
+    const r = await fetch(path, { method, body, headers: type ? { "content-type": type } : undefined });
+    let j = {};
+    try { j = await r.json(); } catch { /* empty body */ }
+    if (!r.ok) throw new Error(j.hint || j.error || `HTTP ${r.status}`);
+    return j;
   }
-  async function setStream(on) {
-    const u = new URL("/api/stream", settings.esp32Url);
-    u.searchParams.set("enable", on ? "1" : "0");
-    u.searchParams.set("token", settings.esp32Token);
-    if (!on) {
-      $("stream").removeAttribute("src"); // closes the MJPEG connection
-      $("stream").hidden = true;
-    }
+
+  function feederText(s) {
+    const f = s.feeder || {};
+    if (!s.feeder_configured) return "테스트 영상 서비스 미설정 (FEEDER_URL)";
+    if (f.error) return "테스트 영상 서비스가 꺼져 있습니다: docker compose --profile test-video up -d video-feeder";
+    const state = f.state === "playing" ? "▶ 재생 중" : f.state === "paused" ? "⏸ 일시정지" : "⏹ 정지";
+    return `${state} · ${f.video} · ${f.frames_sent}프레임 · ${f.video_time_s}s`;
+  }
+
+  async function refreshDevStatus() {
     try {
-      const r = await fetch(u, { method: "POST" });
-      const j = await r.json();
-      streaming = !!j.streaming;
+      const s = await devCall("GET", "/api/dev/status");
+      const d = s.device || {};
+      if (!s.device_configured) {
+        $("dev-status").textContent = "보드 미설정 (.env의 ESP32_URL / ESP32_WEB_TOKEN)";
+      } else if (d.error) {
+        $("dev-status").textContent = `보드 응답 없음 (${d.error})`;
+      } else {
+        $("dev-status").textContent = `보드 연결됨 · 카메라 영상 ${d.streaming ? "ON" : "OFF"}`;
+        if (d.streaming === false && camOn) setCamera(false, true); // auto-off on the device
+      }
+      $("tv-status").textContent = feederText(s);
     } catch (e) {
-      $("error").textContent = `스트리밍 제어 실패: ${e.message}`;
-      streaming = false;
+      $("dev-status").textContent = `상태 확인 실패: ${e.message}`;
     }
-    $("stream-toggle").textContent = streaming ? "스트리밍 끄기" : "스트리밍 켜기";
-    if (streaming) {
-      $("stream").src = streamUrl();
-      $("stream").hidden = false;
+  }
+
+  async function setCamera(on, silent) {
+    const img = $("cam-stream");
+    if (!on) {
+      img.removeAttribute("src"); // closes the MJPEG connection
+      img.hidden = true;
+    }
+    if (!silent) {
+      try {
+        const j = await devCall("POST", `/api/dev/stream?enable=${on ? 1 : 0}`);
+        on = !!j.streaming;
+      } catch (e) {
+        $("dev-status").textContent = `카메라 제어 실패: ${e.message}`;
+        on = false;
+      }
+    }
+    camOn = on;
+    $("cam-toggle").textContent = camOn ? "카메라 끄기" : "카메라 켜기";
+    if (camOn) {
+      img.src = `/api/dev/stream.mjpg?t=${Date.now()}`;
+      img.hidden = false;
+    }
+  }
+
+  function setTestData(on) {
+    settings = { ...settings, testData: on };
+    store.set("xsv-settings", settings);
+    $("test-data-toggle").textContent = `테스트 데이터 보기: ${on ? "ON" : "OFF"}`;
+    refresh();
+  }
+
+  async function sendTestImage() {
+    const file = $("ti-file").files && $("ti-file").files[0];
+    const out = $("ti-result");
+    out.hidden = false;
+    if (!file) {
+      out.textContent = "사진 파일을 먼저 선택하세요.";
+      return;
+    }
+    out.textContent = "보드로 전송 중… (약 7초: 같은 사진을 5번 보내 좌석 상태를 확정합니다)";
+    $("ti-send").disabled = true;
+    try {
+      const j = await devCall("POST", "/api/dev/test-image", file, file.type || "application/octet-stream");
+      const lines = (j.results || []).map((r, i) => (r
+        ? `${i + 1}. ${r.status} · ${r.inference_ms} ms`
+        : `${i + 1}. (결과 없음)`));
+      out.textContent = `보드 추론 완료 (${j.frames_sent}장 전송)\n${lines.join("\n")}\n\n` +
+        "Supabase 저장까지 몇 초 걸립니다 → 이벤트 로그(테스트 데이터)로 이동합니다.";
+      setTestData(true);
+      setTimeout(() => { showTab("events"); refresh(); }, 4000);
+    } catch (e) {
+      out.textContent = `실패: ${e.message}`;
+    } finally {
+      $("ti-send").disabled = false;
     }
   }
 
   function applySettingsUi() {
-    $("stream-section").hidden = !(settings.esp32Url && settings.esp32Token);
+    const show = !!settings.devMode && useProxy() && !!(CFG.deviceControl || CFG.testVideo);
+    $("devtools").hidden = !show;
+    $("test-data-toggle").textContent = `테스트 데이터 보기: ${settings.testData ? "ON" : "OFF"}`;
+    clearInterval(devPoll);
+    devPoll = null;
+    if (show) {
+      refreshDevStatus();
+      devPoll = setInterval(refreshDevStatus, 5000);
+    } else if (camOn) {
+      setCamera(false);
+    }
   }
 
   // ---------------------------------------------------------------- wiring
   for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showTab(t.dataset.tab));
   for (const b of document.querySelectorAll("[data-goto]")) b.addEventListener("click", () => showTab(b.dataset.goto));
   $("seat-filter").addEventListener("change", () => lastFeed && renderFeed(lastFeed));
-  $("stream-toggle").addEventListener("click", () => setStream(!streaming));
+  $("cam-toggle").addEventListener("click", () => setCamera(!camOn));
+  for (const b of document.querySelectorAll("[data-tv]")) {
+    b.addEventListener("click", async () => {
+      try {
+        await devCall("POST", `/api/dev/test-video/${b.dataset.tv}`);
+        if (b.dataset.tv === "play" && !settings.testData) setTestData(true);
+      } catch (e) {
+        $("tv-status").textContent = `실패: ${e.message}`;
+      }
+      refreshDevStatus();
+    });
+  }
+  $("ti-send").addEventListener("click", sendTestImage);
+  $("test-data-toggle").addEventListener("click", () => setTestData(!settings.testData));
   $("open-settings").addEventListener("click", () => {
     const f = $("settings-form");
     for (const [k, v] of Object.entries(settings)) {

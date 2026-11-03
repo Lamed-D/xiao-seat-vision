@@ -67,6 +67,10 @@ services:
       # the browser needs none. Leave empty to require tokens in the dashboard settings.
       DASHBOARD_VIEWER_TOKEN: ${DASHBOARD_VIEWER_TOKEN:-}
       DASHBOARD_ADMIN_TOKEN: ${DASHBOARD_ADMIN_TOKEN:-}
+      # Developer "테스트 모드" (camera ON/OFF, test video, test image). Optional.
+      ESP32_URL: ${ESP32_URL:-}
+      ESP32_WEB_TOKEN: ${ESP32_WEB_TOKEN:-}
+      FEEDER_URL: ${FEEDER_URL:-http://video-feeder:8090}
 
   video-feeder:
     profiles: ["test-video"]

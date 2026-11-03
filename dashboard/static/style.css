@@ -119,3 +119,12 @@ main { max-width: 1200px; }
 .viewer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .viewer .snapshot-wrap img { width: 100%; }
 select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+
+/* ---- 테스트 모드 (developer) ---- */
+.devtools { border-color: #f59f00; }
+.devtools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
+.tool { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 6px; align-content: start; }
+.tool p { margin: 0; }
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn:disabled { opacity: .5; cursor: wait; }
+#ti-result { white-space: pre-wrap; background: var(--bg); padding: 6px; border-radius: 6px; margin: 0; }
