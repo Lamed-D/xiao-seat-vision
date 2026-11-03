@@ -92,7 +92,8 @@
       return {
         x: p.crop.x, y: p.crop.y, w: p.crop.width, h: p.crop.height,
         kind: onSeat ? "seated" : "other",
-        label: `사람 ${p.index}${onSeat ? ` · ${p.seat_label}` : ""}${typeof conf === "number" ? ` ${conf.toFixed(2)}` : ""}`,
+        // seat names are not drawn on the photo; colour still shows seated vs not
+        label: `사람 ${p.index}${typeof conf === "number" ? ` ${conf.toFixed(2)}` : ""}`,
       };
     });
   }
@@ -119,7 +120,7 @@
         ? {
           x: e.person_crop.x, y: e.person_crop.y, w: e.person_crop.width, h: e.person_crop.height,
           kind: "seated",
-          label: `착석 · ${e.seat_label || e.seat_id}${devMode && typeof e.confidence === "number" ? ` ${e.confidence.toFixed(2)}` : ""}`,
+          label: `착석${devMode && typeof e.confidence === "number" ? ` ${e.confidence.toFixed(2)}` : ""}`,
         }
         : null,
     }));

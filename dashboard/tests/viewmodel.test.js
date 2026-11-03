@@ -125,8 +125,12 @@ test("feed model: sit-down cards with box label, confidence only in developer mo
   const off = buildFeedModel(feed, false, now);
   assert.equal(off.todayTotal, 2);
   assert.equal(off.items[0].ago, "2분 전");
-  assert.equal(off.items[0].box.label, "착석 · Seat 1");
-  assert.equal(buildFeedModel(feed, true, now).items[0].box.label, "착석 · Seat 1 0.80");
+  assert.equal(off.items[0].box.label, "착석"); // no seat name on the photo
+  assert.equal(off.items[0].seatLabel, "Seat 1"); // seat shown in the card text instead
+  assert.equal(buildFeedModel(feed, true, now).items[0].box.label, "착석 0.80");
   const boxes = personBoxes([{ index: 1, seat_label: null, crop: { x: 0, y: 0, width: 0.3, height: 0.6 } }]);
   assert.equal(boxes[0].kind, "other");
+  const seated = personBoxes([{ index: 2, seat_label: "Seat 1", crop: { x: 0, y: 0, width: 0.3, height: 0.6 } }]);
+  assert.equal(seated[0].label, "사람 2");
+  assert.equal(seated[0].kind, "seated");
 });

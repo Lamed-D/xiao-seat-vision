@@ -136,17 +136,10 @@
       ? `촬영 ${new Date(summary.snapshot.created_at).toLocaleTimeString()}`
       : "";
 
-    const badges = $("badges");
-    badges.replaceChildren();
+    // Seat states are listed below the photo only (no seat labels drawn on the image).
     const list = $("seat-list");
     list.replaceChildren();
     for (const s of vm.seats) {
-      if (s.anchor) {
-        const b = el("span", { class: `seat-badge state-${s.state}` }, `${s.label} · ${s.stateText}`);
-        b.style.left = `${s.anchor.x * 100}%`;
-        b.style.top = `${s.anchor.y * 100}%`;
-        badges.append(b);
-      }
       const li = el("li", { class: `state-${s.state}` });
       li.append(el("span", { class: "name" }, s.label), el("span", { class: "detail" }, s.stateText));
       list.append(li);
