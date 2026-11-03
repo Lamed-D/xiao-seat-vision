@@ -117,11 +117,13 @@ def cmd_upload(args) -> None:
             continue
         # deterministic ~80/20 split by file name
         category = "testing" if zlib.crc32(name.encode()) % 5 == 0 else "training"
-        body, ctype = multipart("data", name, (folder / name).read_bytes(), "image/png")
+        mime = "image/png" if name.lower().endswith(".png") else "image/jpeg"
+        body, ctype = multipart("data", name, (folder / name).read_bytes(), mime)
         res = request("POST", f"{INGEST}/{category}/files", raw=body, headers={
             "content-type": ctype,
+            # empty list = background-only image (teaches FOMO what is NOT a person)
             "x-bounding-boxes": json.dumps(boxes),
-            "x-label": "person",
+            "x-label": "person" if boxes else "background",
         })
         files = res.get("files", []) if isinstance(res, dict) else []
         if files and all(f.get("success") for f in files):
