@@ -1,0 +1,18 @@
+# Supabase CLI project config for xiao-seat-vision.
+# Only the settings this project relies on are listed; the CLI fills in defaults.
+project_id = "xiao-seat-vision"
+
+# The callers (Python bridge, dashboard) are not Supabase Auth users.
+# Each function authenticates its own tokens (x-bridge-token / x-dashboard-token),
+# so the gateway JWT check is disabled for these functions.
+[functions.log-detection]
+verify_jwt = false
+
+[functions.device-status]
+verify_jwt = false
+
+[functions.ingest-snapshot]
+verify_jwt = false
+
+[functions.dashboard-api]
+verify_jwt = false
