@@ -1,0 +1,19 @@
+# xiao-seat-vision MQTT ACL (Mosquitto). Deny-by-default: anything not listed is refused.
+#
+# Devices: MQTT username MUST equal the device_id. Each device may only publish
+# to its own topics. %u is replaced by the username.
+pattern write xiao-seat-vision/%u/events
+pattern write xiao-seat-vision/%u/status
+pattern write xiao-seat-vision/%u/telemetry
+pattern write xiao-seat-vision/%u/snapshot
+
+# Bridge: read everything it forwards to Supabase.
+user xiao-seat-vision-bridge
+topic read xiao-seat-vision/+/events
+topic read xiao-seat-vision/+/status
+topic read xiao-seat-vision/+/telemetry
+topic read xiao-seat-vision/+/snapshot
+
+# Container healthcheck: may only read the broker uptime.
+user healthcheck
+topic read $SYS/broker/uptime

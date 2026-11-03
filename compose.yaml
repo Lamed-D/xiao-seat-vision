@@ -1,0 +1,89 @@
+# xiao-seat-vision — MQTT infrastructure (single compose file)
+#
+#   docker compose up -d --build                       # mosquitto + mqtt-bridge + dashboard
+#   docker compose --profile test-video up -d --build  # + MP4 virtual camera (video-feeder)
+#
+# Prerequisites (see mqtt/README.md): mqtt/certs/* (gen-dev-certs.sh),
+# mqtt/secrets/passwd (add-user.sh), .env and bridge/.env (from the .example files).
+#
+# Addresses: containers reach the broker as "mosquitto" (Docker network).
+# The ESP32 must use the PC's LAN IP / hostname (in the certificate SAN), never
+# "localhost" or "mosquitto".
+
+name: xiao-seat-vision
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    ports:
+      # TLS only. Bind to a specific LAN IP via MQTT_BIND_ADDRESS; do not port-forward
+      # this to the internet. The plaintext 1883 listener is never published.
+      - "${MQTT_BIND_ADDRESS:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt/acl:/mosquitto/config/acl:ro
+      - ./mqtt/secrets:/mosquitto/secrets:ro
+      - ./mqtt/certs/broker:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    environment:
+      MQTT_HEALTHCHECK_PASSWORD: ${MQTT_HEALTHCHECK_PASSWORD:?set MQTT_HEALTHCHECK_PASSWORD in .env}
+    healthcheck:
+      # Real MQTT round trip (auth + ACL) on the internal listener.
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -u healthcheck -P \"$$MQTT_HEALTHCHECK_PASSWORD\" -t '$$SYS/broker/uptime' -C 1 -W 8 >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  mqtt-bridge:
+    build: ./bridge
+    image: xiao-seat-vision/mqtt-bridge:local
+    restart: unless-stopped
+    env_file: ./bridge/.env
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+    volumes:
+      - ./mqtt/certs/public:/certs:ro
+      - bridge-data:/app/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  dashboard:
+    build: ./dashboard
+    image: xiao-seat-vision/dashboard:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:80"
+    environment:
+      DASHBOARD_API_URL: ${DASHBOARD_API_URL:-}
+
+  video-feeder:
+    profiles: ["test-video"]
+    build: ./video_feeder
+    image: xiao-seat-vision/video-feeder:local
+    restart: "no"
+    env_file:
+      - path: ./video_feeder/.env
+        required: false
+    environment:
+      VIDEO_DIR: /videos
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "8883"
+      MQTT_CA_CERT: /certs/ca.crt
+    ports:
+      - "127.0.0.1:${FEEDER_PORT:-8090}:8090"
+    volumes:
+      - ./test-videos:/videos:ro
+      - ./mqtt/certs/public:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+volumes:
+  mosquitto-data:
+  bridge-data:
