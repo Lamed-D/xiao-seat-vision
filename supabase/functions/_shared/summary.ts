@@ -25,6 +25,18 @@ export interface SummarySeat {
   roi: Roi | null;
 }
 
+/** One detected person in the latest snapshot (for per-person thumbnails). */
+export interface SummaryPerson {
+  index: number; // 1-based, left to right
+  seat_id: string | null; // seat whose ROI contains the person's centre, else null
+  seat_label: string | null;
+  /** Crop of the snapshot to show this person (normalized 0..1). FOMO only finds the
+   *  centre, so the crop is a fixed-size window around it, not an exact outline. */
+  crop: Roi;
+}
+
+export const PERSON_CROP = { width: 0.3, height: 0.6 };
+
 export interface Summary {
   generated_at: string;
   counts: { total: number; occupied: number; empty: number; unknown: number };
@@ -33,6 +45,7 @@ export interface Summary {
   snapshot:
     | { url: string; device_id: string; width: number; height: number; created_at: string }
     | null;
+  people: SummaryPerson[];
 }
 
 type Obj = Record<string, unknown>;
@@ -55,6 +68,50 @@ function asRoi(v: unknown): Roi | null {
     width: r.width as number,
     height: r.height as number,
   };
+}
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/** Per-person crops + seat assignment from the snapshot detections (no scores exposed). */
+export function buildPeople(detections: unknown[], seats: SummarySeat[]): SummaryPerson[] {
+  const centres: { cx: number; cy: number }[] = [];
+  for (const d of detections) {
+    if (typeof d !== "object" || d === null) continue;
+    const o = d as Obj;
+    const cx = typeof o.cx === "number" ? o.cx : (o.x as number) + (o.width as number) / 2;
+    const cy = typeof o.cy === "number" ? o.cy : (o.y as number) + (o.height as number) / 2;
+    if (Number.isFinite(cx) && Number.isFinite(cy)) centres.push({ cx, cy });
+  }
+  centres.sort((a, b) => a.cx - b.cx);
+  return centres.map((c, i) => {
+    // Same rule as the firmware: the seat whose ROI contains the centre; nearest ROI centre wins.
+    let best: SummarySeat | null = null;
+    let bestDist = Infinity;
+    for (const s of seats) {
+      const r = s.roi;
+      if (!r || c.cx < r.x || c.cx > r.x + r.width || c.cy < r.y || c.cy > r.y + r.height) continue;
+      const dist = ((c.cx - (r.x + r.width / 2)) / r.width) ** 2 +
+        ((c.cy - (r.y + r.height / 2)) / r.height) ** 2;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = s;
+      }
+    }
+    const w = PERSON_CROP.width;
+    const h = PERSON_CROP.height;
+    return {
+      index: i + 1,
+      seat_id: best?.seat_id ?? null,
+      seat_label: best?.label ?? null,
+      // keep the whole window inside the image
+      crop: {
+        x: clamp01(Math.min(c.cx - w / 2, 1 - w)),
+        y: clamp01(Math.min(c.cy - h / 2, 1 - h)),
+        width: w,
+        height: h,
+      },
+    };
+  });
 }
 
 export function buildSummary(data: DashboardData, now: Date = new Date()): Summary {
@@ -140,6 +197,10 @@ export function buildSummary(data: DashboardData, now: Date = new Date()): Summa
         created_at: snap.created_at,
       }
       : null,
+    // Thumbnails only make sense together with the image they are cut from.
+    people: snap && data.snapshotUrl
+      ? buildPeople(snap.detections ?? [], list.filter((s) => s.device_id === snap.device_id))
+      : [],
   };
 }
 

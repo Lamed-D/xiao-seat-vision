@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1.0.13";
 import { createDashboardHandler } from "../dashboard-api/handler.ts";
-import { buildSummary } from "../_shared/summary.ts";
+import { buildPeople, buildSummary } from "../_shared/summary.ts";
 import type { DashboardData } from "../_shared/store.ts";
 import { ADMIN, FakeStore, VIEWER } from "./fakes.ts";
 
@@ -150,4 +150,38 @@ Deno.test("CORS preflight only for allowed origins", async () => {
     new Request("http://x/", { method: "OPTIONS", headers: { origin: "https://evil.example" } }),
   );
   assertEquals(evil.headers.get("access-control-allow-origin"), null);
+});
+
+Deno.test("people: one crop per detection, seat assigned, no scores in summary", () => {
+  const d = data();
+  d.latestSnapshot = {
+    snapshot_id: "xiao-01-a-s1",
+    device_id: "xiao-01",
+    storage_path: "p",
+    reason: "state_change",
+    width: 320,
+    height: 240,
+    seats: [],
+    detections: [
+      { x: 0.78, y: 0.4, width: 0.05, height: 0.05, cx: 0.8, cy: 0.42, confidence: 0.9 },
+      { x: 0.18, y: 0.4, width: 0.05, height: 0.05, cx: 0.2, cy: 0.42, confidence: 0.8 },
+      { x: 0.5, y: 0.05, width: 0.05, height: 0.05, cx: 0.52, cy: 0.07, confidence: 0.7 },
+    ],
+    device_ts: null,
+    created_at: "2026-11-03T09:59:00Z",
+  };
+  d.snapshotUrl = "https://example/snap.jpg";
+  const s = buildSummary(d, NOW);
+  assertEquals(s.people.map((p) => p.index), [1, 2, 3]);
+  assertEquals(s.people.map((p) => p.seat_id), ["seat_01", null, "seat_03"]); // sorted left to right
+  for (const p of s.people) {
+    assert(p.crop.x >= 0 && p.crop.x + p.crop.width <= 1.000001);
+    assert(p.crop.y >= 0 && p.crop.y + p.crop.height <= 1.000001);
+  }
+  assert(!JSON.stringify(s.people).includes("confidence"));
+});
+
+Deno.test("people: empty without snapshot or detections", () => {
+  assertEquals(buildSummary(data(), NOW).people, []);
+  assertEquals(buildPeople([], []), []);
 });
