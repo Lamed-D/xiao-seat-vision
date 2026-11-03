@@ -10,6 +10,7 @@
 import { tokenMatches } from "../_shared/auth.ts";
 import { ConstraintError, json, logError, readJson } from "../_shared/http.ts";
 import type { Store } from "../_shared/store.ts";
+import { buildFeed } from "../_shared/feed.ts";
 import { buildDebug, buildSummary } from "../_shared/summary.ts";
 import { validateLayout } from "../_shared/validation.ts";
 
@@ -17,7 +18,7 @@ export interface DashboardDeps {
   viewerTokens: readonly string[];
   adminTokens: readonly string[];
   allowedOrigins: readonly string[]; // exact origins, or "*"
-  store: Pick<Store, "loadDashboard" | "recentEvents" | "replaceLayout">;
+  store: Pick<Store, "loadDashboard" | "recentEvents" | "replaceLayout" | "occupancyFeed">;
   now?: () => Date;
 }
 
@@ -58,6 +59,32 @@ export function createDashboardHandler(
       if (req.method === "GET" && view === "summary") {
         const data = await deps.store.loadDashboard(isTest);
         return json(200, buildSummary(data, deps.now?.() ?? new Date()), cors);
+      }
+      if (req.method === "GET" && view === "events") {
+        // Sit-down feed: viewer gets images/seats/times, admin additionally confidence.
+        const limit = Math.min(
+          Math.max(Number(url.searchParams.get("limit") ?? "30") || 30, 1),
+          100,
+        );
+        const sinceParam = url.searchParams.get("since");
+        const sinceMs = sinceParam && Number.isFinite(Date.parse(sinceParam))
+          ? Date.parse(sinceParam)
+          : (deps.now?.() ?? new Date()).getTime() - 24 * 3600 * 1000;
+        const since = new Date(sinceMs).toISOString();
+        const f = await deps.store.occupancyFeed(isTest, limit, since);
+        return json(
+          200,
+          buildFeed(
+            f.events,
+            f.snapshots,
+            f.since,
+            since,
+            f.labels,
+            isAdmin,
+            deps.now?.() ?? new Date(),
+          ),
+          cors,
+        );
       }
       if (req.method === "GET" && view === "debug") {
         if (!isAdmin) return json(403, { error: "admin_token_required" }, cors);

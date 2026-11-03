@@ -3,6 +3,7 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { CONSTRAINT_CODES, ConstraintError } from "./http.ts";
+import type { FeedEventRow, FeedSnapshotRow } from "./feed.ts";
 import type {
   CurrentStateRow,
   DashboardData,
@@ -141,6 +142,52 @@ export class SupabaseStore implements Store {
       latestSnapshot: latest,
       snapshotUrl,
     };
+  }
+
+  async occupancyFeed(isTest: boolean, limit: number, since: string) {
+    const [ev, today, layouts] = await Promise.all([
+      this.db.from("seat_events")
+        .select("event_id,device_id,seat_id,state,confidence,created_at")
+        .eq("is_test", isTest).eq("state", "occupied")
+        .order("created_at", { ascending: false }).limit(limit),
+      this.db.from("seat_events").select("seat_id")
+        .eq("is_test", isTest).eq("state", "occupied").gte("created_at", since).limit(5000),
+      this.db.from("seat_layouts").select("device_id,seat_id,label"),
+    ]);
+    for (const r of [ev, today, layouts]) check(r.error);
+    const events = (ev.data ?? []) as FeedEventRow[];
+
+    let snapshots: FeedSnapshotRow[] = [];
+    if (events.length > 0) {
+      const times = events.map((e) => Date.parse(e.created_at));
+      const from = new Date(Math.min(...times) - 60_000).toISOString();
+      const to = new Date(Math.max(...times) + 60_000).toISOString();
+      const sn = await this.db.from("seat_snapshots")
+        .select("snapshot_id,device_id,storage_path,created_at,width,height,seats,detections")
+        .eq("is_test", isTest).gte("created_at", from).lte("created_at", to)
+        .order("created_at", { ascending: false }).limit(300);
+      check(sn.error);
+      const rows = sn.data ?? [];
+      const signed = rows.length
+        ? await this.db.storage.from(SNAPSHOT_BUCKET)
+          .createSignedUrls(rows.map((r) => r.storage_path as string), 600)
+        : { data: [] as { signedUrl: string | null }[] };
+      snapshots = rows.map((r, i) => ({
+        snapshot_id: r.snapshot_id as string,
+        device_id: r.device_id as string,
+        created_at: r.created_at as string,
+        width: r.width as number,
+        height: r.height as number,
+        seats: (r.seats ?? []) as unknown[],
+        detections: (r.detections ?? []) as unknown[],
+        url: signed.data?.[i]?.signedUrl ?? null,
+      }));
+    }
+    const labels = new Map<string, string>();
+    for (const l of layouts.data ?? []) {
+      labels.set(`${l.device_id}/${l.seat_id}`, l.label as string);
+    }
+    return { events, snapshots, since: (today.data ?? []) as { seat_id: string }[], labels };
   }
 
   async recentEvents(isTest: boolean, limit: number): Promise<unknown[]> {

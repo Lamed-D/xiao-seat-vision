@@ -1,6 +1,7 @@
 // Storage interface used by the handlers. The real implementation lives in
 // supabase_store.ts (supabase-js, service role); tests inject fakes.
 
+import type { FeedEventRow, FeedSnapshotRow } from "./feed.ts";
 import type { DeviceStatusInput, LayoutSeat, SeatEventRow, SnapshotInput } from "./validation.ts";
 
 export type InsertOutcome = "created" | "duplicate";
@@ -64,5 +65,12 @@ export interface Store {
   saveSnapshot(input: SnapshotInput): Promise<InsertOutcome>;
   loadDashboard(isTest: boolean): Promise<DashboardData>;
   recentEvents(isTest: boolean, limit: number): Promise<unknown[]>;
+  /** Occupied events (newest first), snapshots around them (signed URLs) and events since `since`. */
+  occupancyFeed(isTest: boolean, limit: number, since: string): Promise<{
+    events: FeedEventRow[];
+    snapshots: FeedSnapshotRow[];
+    since: { seat_id: string }[];
+    labels: Map<string, string>;
+  }>;
   replaceLayout(deviceId: string, seats: LayoutSeat[]): Promise<void>;
 }

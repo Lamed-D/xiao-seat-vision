@@ -45,6 +45,15 @@ export class FakeStore implements Store {
   loadDashboard(_isTest: boolean): Promise<DashboardData> {
     return Promise.resolve(this.dashboard);
   }
+  feed = {
+    events: [] as import("../_shared/feed.ts").FeedEventRow[],
+    snapshots: [] as import("../_shared/feed.ts").FeedSnapshotRow[],
+    since: [] as { seat_id: string }[],
+    labels: new Map<string, string>(),
+  };
+  occupancyFeed(_isTest: boolean, _limit: number, _since: string) {
+    return Promise.resolve(this.feed);
+  }
   recentEvents(_isTest: boolean, _limit: number): Promise<unknown[]> {
     return Promise.resolve([...this.events.values()]);
   }
