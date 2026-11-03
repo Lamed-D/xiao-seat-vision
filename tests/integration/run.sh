@@ -74,7 +74,9 @@ EVENT='{"event_id":"xiao-test-01-it-000001","device_id":"xiao-test-01","seat_id"
 echo "--- broker security"
 check "anonymous connection refused" "! mq mosquitto_pub $TLS -t xiao-seat-vision/x/events -m x -q 1 2>/dev/null"
 check "wrong password refused" "! mq mosquitto_pub $TLS -u xiao-test-01 -P wrong -t xiao-seat-vision/xiao-test-01/events -m x -q 1 2>/dev/null"
-check "plaintext 1883 not published on host" "[ -z \"\$(compose port mosquitto 1883 2>/dev/null)\" ]"
+# `docker compose port` output for unpublished ports differs between versions/platforms,
+# so list all published mappings of the container and make sure 1883 is not among them.
+check "plaintext 1883 not published on host" "docker port \$(compose ps -q mosquitto) | grep -q '^8883/' && ! docker port \$(compose ps -q mosquitto) | grep -q '^1883/'"
 BROKER_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(compose ps -q mosquitto)")"
 # Same broker, but addressed by its container IP, which is NOT in the certificate SAN.
 # -d makes mosquitto_pub print the TLS reason instead of only "Protocol error".
