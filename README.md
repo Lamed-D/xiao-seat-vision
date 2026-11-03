@@ -15,11 +15,13 @@
 > |---|---|
 > | 펌웨어 컴파일 (Arduino CLI, esp32 코어 3.3.12) | ✅ 확인됨 |
 > | 펌웨어 로직 / 브리지 / Edge Function / DB 마이그레이션 / Docker 통합 테스트 | ✅ 자동 테스트 통과 |
+> | **실제 보드: PSRAM 8 MB + 카메라(OV3660) 320×240 촬영** | ✅ **확인됨** (2026-11-03, FB-OVF 0건, 메모리 안정) |
 > | **AI 모델 (Edge Impulse)** | ❌ **아직 없음** — 모델을 넣기 전에는 좌석 판단·이벤트 전송을 하지 않습니다(가짜 결과 없음) |
-> | 실제 보드에서 카메라·Wi-Fi·MQTT 동작 | ⏳ 직접 확인 필요 → [하드웨어 체크리스트](docs/hardware-test.md) |
+> | 실제 보드에서 Wi-Fi·MQTT·스트리밍 | ⏳ 직접 확인 필요 → [하드웨어 체크리스트](docs/hardware-test.md) |
 > | Supabase 실제 배포 | ⏳ 직접 수행 필요 (아래 6단계) |
 >
 > "CI 통과 = 컴파일 성공"이며, 보드에서 실제로 동작함을 뜻하지 않습니다.
+> 무엇을 언제 어떻게 검증했는지는 [docs/test-results.md](docs/test-results.md)에 기록합니다.
 
 ---
 
@@ -202,7 +204,7 @@ xiao-seat-vision/
 [boot] device=xiao-01 config=config.example.h (placeholders - network disabled) chip=ESP32-S3 rev0 cpu=240MHz flash=8388608B core=3.3.12
 [mem] heap: total=... free=... min_free=... max_alloc=...
 [mem] psram: total=8386279 free=... min_free=... max_alloc=...      ← PSRAM 정상
-[camera] ready: sensor=OV3660 (PID 0x3660)                           ← 카메라 정상 (OV2640일 수도 있음)
+[camera] ready: sensor=OV3660 (PID 0x3660)                           ← 카메라 정상 (이 보드는 OV3660 확인됨, 다른 보드는 OV2640일 수 있음)
 [infer] Edge Impulse model NOT integrated (...)                      ← 아직 모델 없음 (정상)
 [boot] 3 seat(s) configured
 [wifi] not configured (XSV_WIFI_SSID empty) - networking disabled
@@ -571,7 +573,7 @@ bash tests/integration/run.sh
 
 **기여 규칙** — 브랜치 `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `ci/…` / 커밋 `type(scope): description` (Conventional Commits) → [CONTRIBUTING.md](CONTRIBUTING.md)
 
-**문서**: [architecture](docs/architecture.md) · [setup](docs/setup.md) · [edge-impulse](docs/edge-impulse.md) · [supabase](docs/supabase.md) · [dashboard](docs/dashboard.md) · [test-video](docs/test-video.md) · [ci](docs/ci.md) · [hardware-test](docs/hardware-test.md) · [mqtt](mqtt/README.md)
+**문서**: [test-results](docs/test-results.md) · [architecture](docs/architecture.md) · [setup](docs/setup.md) · [edge-impulse](docs/edge-impulse.md) · [supabase](docs/supabase.md) · [dashboard](docs/dashboard.md) · [test-video](docs/test-video.md) · [ci](docs/ci.md) · [hardware-test](docs/hardware-test.md) · [mqtt](mqtt/README.md)
 
 ---
 

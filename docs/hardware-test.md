@@ -3,11 +3,14 @@
 None of these have been executed yet. CI only proves compilation. Record date, firmware commit, sensor.
 
 ## 1. Board, PSRAM, camera
-- [ ] Boot log: `chip=ESP32-S3`, `core=3.3.12`, flash 8 MB
-- [ ] `[mem] psram: total≈8 MB` (Tools → PSRAM → OPI PSRAM)
-- [ ] `[camera] ready: sensor=OV2640|OV3660` — note which one
-- [ ] `capture_snapshot.py` saves a correct 320×240 JPEG (orientation, focus, field of view)
-- [ ] 30 min idle: `[mem]` free heap/PSRAM stable (no frame-buffer leak)
+Tool: `python firmware/tools/camera_viewer.py COM5` → http://127.0.0.1:8000 (live view + automatic checks).
+Results are recorded in [test-results.md](test-results.md).
+- [x] Boot log: `chip=ESP32-S3`, `core=3.3.12`, flash 8 MB — 2026-11-03 (rev2)
+- [x] `[mem] psram: total≈8 MB` (Tools → PSRAM → OPI PSRAM) — 8,388,608 B
+- [x] `[camera] ready: sensor=OV2640|OV3660` — **OV3660**
+- [x] 320×240 JPEG frames received, focus/exposure OK — 103 frames, 0 FB-OVF, 0 capture failures
+- [ ] Orientation / field of view at the final mounting position (camera was tilted on the desk)
+- [ ] 30 min idle: `[mem]` free heap/PSRAM stable (no frame-buffer leak) — only ~30 s observed so far
 
 ## 2. Network
 - [ ] Wi-Fi connects; unplug the AP → `connection lost` → reconnect with backoff, loop keeps running
