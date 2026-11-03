@@ -171,98 +171,108 @@ def test_all_event_images_stay_available_for_a_full_feed():
         assert all(c.get(u).status_code == 200 for u in urls)
 
 
-# ---------------------------------------------------------------- 테스트 모드 (developer)
-ESP32 = "http://172.16.0.50"
-ESP_TOKEN = "esp-web-token-123"
+# ---------------------------------------------------------------- 테스트 모드 (developer, MQTT)
 FEEDER = "http://video-feeder:8090"
 
 
-class Device:
-    """Fake ESP32 web API + video feeder."""
+class FakeLink:
+    """Stands in for the MQTT link: records commands/frames, answers like the device."""
 
-    def __init__(self):
-        self.calls = []
-        self.mode = "live_camera"
-        self.streaming = False
+    def __init__(self, connected=True):
+        self.connected = connected
+        self.commands, self.frames, self._results = [], [], []
+        self._frame, self._seq = None, 0
 
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        self.calls.append((request.method, request.url.path, dict(request.url.params)))
-        if url.startswith(FEEDER):
-            return httpx.Response(200, json={"state": "playing" if request.url.path == "/play" else "stopped",
-                                             "video": "demo.mp4", "frames_sent": 3, "video_time_s": 1.5})
-        if request.url.params.get("token") != ESP_TOKEN:
-            return httpx.Response(401, json={"error": "token"})
-        if request.url.port == 81:
-            return httpx.Response(200, content=b"--xsvframe\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg(),
-                                  headers={"content-type": "multipart/x-mixed-replace;boundary=xsvframe"})
-        if request.url.path == "/api/status":
-            return httpx.Response(200, json={"streaming": self.streaming, "client": False})
-        if request.url.path == "/api/stream":
-            self.streaming = request.url.params.get("enable") == "1"
-            return httpx.Response(200, json={"streaming": self.streaming})
-        if request.url.path == "/api/mode":
-            self.mode = request.url.params.get("mode")
-            return httpx.Response(200, json={"mode": self.mode})
-        if request.url.path == "/api/test-frame":
-            assert request.content[:2] == b"\xff\xd8"
-            return httpx.Response(202, json={"accepted": True, "last_result": {
-                "status": "ok", "state": "unknown", "confidence": 0, "inference_ms": 123}})
-        return httpx.Response(404, json={})
+    def send_command(self, payload):
+        self.commands.append(payload)
+        if payload.get("cmd") == "stream" and payload.get("enable"):
+            self._frame, self._seq = jpeg(), self._seq + 1  # device starts publishing
+        return True
+
+    def send_frame(self, data):
+        self.frames.append(data)
+        import time as _t
+        self._results.append({"status": "ok", "persons": 1, "inference_ms": 122, "received_at": _t.time()})
+        return True
+
+    def latest_frame(self):
+        return self._frame, self._seq, __import__("time").time()
+
+    def results_since(self, t):
+        return [r for r in self._results if r["received_at"] >= t]
 
 
-def dev_client(device, monkeypatch):
+def feeder_transport(request: httpx.Request) -> httpx.Response:
+    if str(request.url).startswith(FEEDER):
+        return httpx.Response(200, json={"state": "playing" if request.url.path == "/play" else "stopped",
+                                         "video": "demo.mp4", "frames_sent": 3, "video_time_s": 1.5})
+    return Upstream()(request)
+
+
+def dev_client(link, monkeypatch):
     monkeypatch.setenv("TEST_FRAME_GAP_S", "0")
-    app = create_app(Settings(API, VIEWER, ADMIN, esp32_url=ESP32, esp32_token=ESP_TOKEN, feeder_url=FEEDER),
-                     httpx.MockTransport(device))
+    app = create_app(Settings(API, VIEWER, ADMIN, feeder_url=FEEDER), httpx.MockTransport(feeder_transport),
+                     link=link)
     return TestClient(app)
 
 
-def test_dev_config_flags_and_status(monkeypatch):
-    d = Device()
-    with dev_client(d, monkeypatch) as c:
+def test_dev_config_and_status(monkeypatch):
+    with dev_client(FakeLink(), monkeypatch) as c:
         cfg = c.get("/config.js").text
-        assert '"deviceControl": true' in cfg and '"testVideo": true' in cfg and ESP_TOKEN not in cfg
+        assert '"deviceControl": true' in cfg and '"testVideo": true' in cfg
         s = c.get("/api/dev/status").json()
-        assert s["device"]["streaming"] is False and s["feeder"]["video"] == "demo.mp4"
-        assert ESP_TOKEN not in json.dumps(s)
+        assert s["transport"] == "mqtt" and s["mqtt_connected"] is True
+        assert s["feeder"]["video"] == "demo.mp4"
 
 
-def test_dev_camera_on_off_and_stream_proxy(monkeypatch):
-    d = Device()
-    with dev_client(d, monkeypatch) as c:
+def test_dev_camera_preview_over_mqtt(monkeypatch):
+    link = FakeLink()
+    with dev_client(link, monkeypatch) as c:
         assert c.post("/api/dev/stream?enable=1").json() == {"streaming": True}
-        r = c.get("/api/dev/stream.mjpg")
-        assert r.status_code == 200 and r.headers["content-type"].startswith("multipart/x-mixed-replace")
-        assert b"\xff\xd8" in r.content
         assert c.post("/api/dev/stream?enable=0").json() == {"streaming": False}
+    assert link.commands[0] == {"cmd": "stream", "enable": True, "seconds": 60}
+    assert link.commands[1]["enable"] is False
 
 
-def test_dev_test_video_controls(monkeypatch):
-    d = Device()
-    with dev_client(d, monkeypatch) as c:
-        assert c.post("/api/dev/test-video/play").json()["state"] == "playing"
-        assert c.post("/api/dev/test-video/stop").status_code == 200
-        assert c.post("/api/dev/test-video/rewind").status_code == 404
-
-
-def test_dev_test_image_runs_device_pipeline_and_restores_live_mode(monkeypatch):
-    d = Device()
+def test_dev_test_image_over_mqtt_restores_live_mode(monkeypatch):
+    link = FakeLink()
     buf = io.BytesIO()
     Image.new("RGB", (1000, 600), (10, 200, 30)).save(buf, "PNG")  # any format/size
-    with dev_client(d, monkeypatch) as c:
+    with dev_client(link, monkeypatch) as c:
         r = c.post("/api/dev/test-image", content=buf.getvalue(), headers={"content-type": "image/png"})
         assert r.status_code == 200
         body = r.json()
-        assert body["frames_sent"] == 5 and len(body["results"]) == 4
+        assert body["frames_sent"] == 5 and body["device_answered"] is True and len(body["results"]) == 5
         assert c.post("/api/dev/test-image", content=b"not an image").status_code == 422
-    paths = [p for _m, p, _q in d.calls]
-    assert paths[0] == "/api/mode" and paths.count("/api/test-frame") == 5
-    assert d.mode == "live_camera"  # always switched back
+    assert link.commands[0] == {"cmd": "mode", "mode": "test_video"}
+    assert link.commands[-1] == {"cmd": "mode", "mode": "live_camera"}  # always switched back
+    frame = Image.open(io.BytesIO(link.frames[0]))
+    assert frame.size == (320, 240) and link.frames[0][:2] == bytes([0xFF, 0xD8])
 
 
-def test_dev_controls_not_configured(monkeypatch):
-    with client()[0] as c:  # no ESP32 / feeder settings
+def test_dev_test_video_controls(monkeypatch):
+    with dev_client(FakeLink(), monkeypatch) as c:
+        assert c.post("/api/dev/test-video/play").json()["state"] == "playing"
+        assert c.post("/api/dev/test-video/rewind").status_code == 404
+
+
+def test_dev_controls_unavailable(monkeypatch):
+    with dev_client(FakeLink(connected=False), monkeypatch) as c:
         assert c.post("/api/dev/stream?enable=1").status_code == 503
-        assert c.post("/api/dev/test-video/play").status_code == 503
+    with client()[0] as c:  # no MQTT configured at all
+        assert c.post("/api/dev/test-image", content=b"x").status_code == 503
         assert '"deviceControl": false' in c.get("/config.js").text
+
+
+def test_dev_preview_mjpeg_delivers_frames(monkeypatch):
+    """Regression: request.is_disconnected() under the http middleware blocked the stream."""
+    from app import dev as devmod
+    monkeypatch.setattr(devmod, "PREVIEW_MAX_S", 0.5)  # let the endless stream end for the test
+    link = FakeLink()
+    with dev_client(link, monkeypatch) as c:
+        r = c.get("/api/dev/stream.mjpg")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("multipart/x-mixed-replace")
+        assert b"Content-Type: image/jpeg" in r.content and bytes([0xFF, 0xD8]) in r.content
+    assert link.commands[0]["enable"] is True
+    assert link.commands[-1] == {"cmd": "stream", "enable": False}  # turned off afterwards

@@ -45,9 +45,16 @@ class Settings:
     viewer_token: str = ""
     admin_token: str = ""
     timeout_s: float = 15.0
-    esp32_url: str = ""
-    esp32_token: str = ""
     feeder_url: str = ""
+    # MQTT link for the developer test mode (device control via the broker)
+    mqtt_host: str = ""
+    mqtt_port: int = 8883
+    mqtt_tls: bool = True
+    mqtt_ca_cert: str = ""
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_prefix: str = "xiao-seat-vision"
+    device_id: str = "xiao-01"
 
     @staticmethod
     def from_env() -> "Settings":
@@ -56,10 +63,20 @@ class Settings:
             viewer_token=os.environ.get("DASHBOARD_VIEWER_TOKEN", "").strip(),
             admin_token=os.environ.get("DASHBOARD_ADMIN_TOKEN", "").strip(),
             timeout_s=float(os.environ.get("UPSTREAM_TIMEOUT_S", "15")),
-            esp32_url=os.environ.get("ESP32_URL", "").strip(),
-            esp32_token=os.environ.get("ESP32_WEB_TOKEN", "").strip(),
             feeder_url=os.environ.get("FEEDER_URL", "").strip(),
+            mqtt_host=os.environ.get("MQTT_HOST", "").strip(),
+            mqtt_port=int(os.environ.get("MQTT_PORT", "8883")),
+            mqtt_tls=os.environ.get("MQTT_TLS", "true").lower() in ("1", "true", "yes"),
+            mqtt_ca_cert=os.environ.get("MQTT_CA_CERT", "").strip(),
+            mqtt_username=os.environ.get("MQTT_USERNAME", "").strip(),
+            mqtt_password=os.environ.get("MQTT_PASSWORD", "").strip(),
+            mqtt_prefix=os.environ.get("MQTT_TOPIC_PREFIX", "xiao-seat-vision").strip(),
+            device_id=os.environ.get("DEVICE_ID", "xiao-01").strip(),
         )
+
+    @property
+    def mqtt(self) -> bool:
+        return bool(self.mqtt_host and self.mqtt_username and self.mqtt_password)
 
     @property
     def proxy(self) -> bool:
@@ -98,18 +115,31 @@ class SnapshotCache:
         return self._items.get(key)
 
 
-def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTransport | None = None,
+               link=None) -> FastAPI:
     settings = settings or Settings.from_env()
     cache = SnapshotCache()
+    owns_link = False
+    if link is None and settings.mqtt:
+        from .mqtt_link import MqttLink
+
+        link = MqttLink(settings.mqtt_host, settings.mqtt_port, settings.mqtt_username,
+                        settings.mqtt_password, settings.mqtt_ca_cert or None, settings.mqtt_prefix,
+                        settings.device_id, tls=settings.mqtt_tls)
+        owns_link = True
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # TLS verification stays on (httpx default).
         app.state.http = httpx.AsyncClient(timeout=settings.timeout_s, transport=transport)
+        if owns_link:
+            link.start()
         log.info("dashboard server: token proxy %s, admin %s",
                  "enabled" if settings.proxy else "disabled",
                  "available" if settings.admin_token else "missing")
         yield
+        if owns_link:
+            link.stop()
         await app.state.http.aclose()
 
     app = FastAPI(title="xiao-seat-vision dashboard", version="1.0.0", lifespan=lifespan)
@@ -137,7 +167,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
     @app.get("/config.js")
     async def config_js() -> Response:
         cfg = {"apiUrl": settings.api_url, "proxy": settings.proxy, "proxyAdmin": bool(settings.admin_token),
-               "deviceControl": bool(settings.esp32_url and settings.esp32_token),
+               "deviceControl": link is not None,
                "testVideo": bool(settings.feeder_url)}
         return Response(f"window.XSV_CONFIG = {json.dumps(cfg)};\n", media_type="application/javascript",
                         headers={"cache-control": "no-store"})
@@ -225,7 +255,7 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         return Response(thumbs[index], media_type="image/jpeg",
                         headers={"cache-control": "private, max-age=600"})
 
-    dev.register(app, settings.esp32_url, settings.esp32_token, settings.feeder_url,
+    dev.register(app, link, settings.feeder_url,
                  frame_gap_s=float(os.environ.get("TEST_FRAME_GAP_S", dev.FRAME_GAP_S)))
 
     @app.middleware("http")
