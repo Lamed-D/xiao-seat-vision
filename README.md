@@ -299,6 +299,15 @@ ipconfig        # Windows: "무선 LAN 어댑터 Wi-Fi"의 IPv4 주소, 예: 192
 ```
 공유기 설정에서 이 PC에 **고정 IP(DHCP 예약)** 를 주는 것을 권장합니다. (IP가 바뀌면 인증서를 다시 만들어야 함)
 
+> **⚡ 빠른 방법 (권장): 7-2 ~ 7-4와 8단계의 MQTT 항목을 한 번에 자동 설정**
+> 먼저 `firmware/xiao_seat_vision/config.h`에 Wi-Fi(SSID/비밀번호)만 입력해 두고 Git Bash에서:
+> ```bash
+> python scripts/setup_local.py --host 192.168.0.10 --host <PC이름> --supabase-ref <ref>
+> ```
+> 인증서, MQTT 계정 3개, `.env`, `bridge/.env`, `supabase/.env.secrets`(토큰 3종), `config.h`의 MQTT 주소·비밀번호·CA 인증서·웹 토큰을 만듭니다.
+> 이미 있는 값은 덮어쓰지 않고, 비밀값은 화면에 출력하지 않습니다(모두 Git 제외 파일). 끝나면 7-5로 넘어가세요.
+> PC 이름은 `hostname` 명령으로 확인합니다. 아래 7-2 ~ 7-4는 같은 작업을 수동으로 하는 방법입니다.
+
 ### 7-2. TLS 인증서 만들기 (개발용 자체 CA)
 ```bash
 sh mqtt/scripts/gen-dev-certs.sh 192.168.0.10          # ← 7-1의 IP. 호스트명도 추가 가능: ... 192.168.0.10 my-pc.local
