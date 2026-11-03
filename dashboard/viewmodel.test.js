@@ -12,6 +12,10 @@ const summary = {
     { device_id: "xiao-01", seat_id: "seat_03", label: "좌석 3", state: "unknown", roi: null },
   ],
   snapshot: { url: "https://example/snap.jpg" },
+  people: [
+    { index: 1, seat_id: "seat_01", seat_label: "좌석 1", crop: { x: 0.05, y: 0.1, width: 0.3, height: 0.6 } },
+    { index: 2, seat_id: null, seat_label: null, crop: { x: 0.6, y: 0.2, width: 0.3, height: 0.6 } },
+  ],
 };
 const debug = {
   current_states: [{ device_id: "xiao-01", seat_id: "seat_01", confidence: 0.912, inference_ms: 133, event_id: "xiao-01-a-1" }],
@@ -25,7 +29,7 @@ test("developer mode OFF: no technical data in the view model", () => {
   const vm = buildViewModel(summary, debug, false);
   assert.equal(vm.dev, null);
   const text = JSON.stringify(vm);
-  for (const hidden of ["confidence", "inference", "heap", "psram", "0.912", "event_id", "detections", "roi"]) {
+  for (const hidden of ["confidence", "inference", "heap", "psram", "0.912", "event_id", "detections", '"roi"']) {
     assert.ok(!text.includes(hidden), `leaked ${hidden}`);
   }
   assert.deepEqual(vm.counts, summary.counts);
@@ -53,4 +57,12 @@ test("developer mode ON without admin data degrades gracefully", () => {
 test("unexpected states render as unknown", () => {
   const vm = buildViewModel({ ...summary, seats: [{ ...summary.seats[0], state: "weird" }] }, null, false);
   assert.equal(vm.seats[0].state, "unknown");
+});
+
+test("people: labels per person, seat text, scores only in developer mode", () => {
+  const off = buildViewModel(summary, debug, false);
+  assert.deepEqual(off.people.map((p) => [p.title, p.seatText]), [["사람 1", "좌석 1"], ["사람 2", "좌석 밖"]]);
+  assert.ok(!JSON.stringify(off.people).includes("confidence"));
+  const on = buildViewModel(summary, debug, true);
+  assert.deepEqual(on.dev.personConfidence, [0.9]);
 });

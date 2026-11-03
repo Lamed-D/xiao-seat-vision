@@ -97,6 +97,31 @@
     $("updated").textContent = vm.updatedAt ? new Date(vm.updatedAt).toLocaleString() : "–";
   }
 
+  // Shows a crop of the snapshot without canvas (no CORS needed): the image is used as a
+  // background scaled so that the crop window fills the thumbnail.
+  function renderPeople(vm) {
+    const list = $("people-list");
+    list.replaceChildren();
+    $("people-section").hidden = !(vm.snapshotUrl && vm.people.length);
+    $("people-count").textContent = vm.people.length ? `(${vm.people.length}명)` : "";
+    vm.people.forEach((p, i) => {
+      const li = el("li");
+      const thumb = el("div", { class: "person-thumb", role: "img", "aria-label": p.title });
+      const c = p.crop;
+      thumb.style.backgroundImage = `url("${vm.snapshotUrl}")`;
+      thumb.style.backgroundSize = `${100 / c.width}% ${100 / c.height}%`;
+      thumb.style.backgroundPosition = `${c.width >= 1 ? 0 : (c.x / (1 - c.width)) * 100}% ${
+        c.height >= 1 ? 0 : (c.y / (1 - c.height)) * 100
+      }%`;
+      const meta = el("div", { class: "person-meta" });
+      meta.append(el("b", {}, p.title), document.createTextNode(p.seatText));
+      const conf = vm.dev?.personConfidence?.[i];
+      if (vm.dev && typeof conf === "number") meta.append(el("div", { class: "muted small" }, `신뢰도 ${conf.toFixed(2)}`));
+      li.append(thumb, meta);
+      list.append(li);
+    });
+  }
+
   function renderOverlay(vm) {
     const svg = $("overlay");
     svg.replaceChildren();
@@ -213,6 +238,7 @@
       }
       const vm = buildViewModel(summary, debug, settings.devMode);
       renderBasic(vm);
+      renderPeople(vm);
       renderOverlay(vm);
       renderDev(vm);
     } catch (e) {

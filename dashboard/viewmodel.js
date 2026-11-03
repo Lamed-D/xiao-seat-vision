@@ -23,9 +23,17 @@
       // ROI is used only to position the badge on the image, never printed.
       anchor: s.roi ? { x: s.roi.x + s.roi.width / 2, y: s.roi.y + s.roi.height / 2 } : null,
     }));
+    // Per-person thumbnails: crop window only (no scores, no raw coordinates shown).
+    const people = (summary?.people ?? []).map((p) => ({
+      index: p.index,
+      title: `사람 ${p.index}`,
+      seatText: p.seat_label ? `${p.seat_label}` : "좌석 밖",
+      crop: p.crop,
+    }));
     const vm = {
       counts: summary?.counts ?? { total: 0, occupied: 0, empty: 0, unknown: 0 },
       seats,
+      people,
       snapshotUrl: summary?.snapshot?.url ?? null,
       updatedAt: summary?.generated_at ?? null,
       dev: null,
@@ -52,6 +60,11 @@
         };
       }),
       detections: debug?.latest_snapshot?.detections ?? [],
+      // detections sorted left->right to match the person numbering of the summary
+      personConfidence: [...(debug?.latest_snapshot?.detections ?? [])]
+        .filter((d) => typeof d.cx === "number")
+        .sort((a, b) => a.cx - b.cx)
+        .map((d) => d.confidence),
       perf: telemetry?.perf ?? null,
       memory: telemetry?.memory ?? null,
       model: telemetry?.model ?? null,

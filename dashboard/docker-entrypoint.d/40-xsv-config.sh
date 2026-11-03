@@ -36,7 +36,8 @@ conf=/etc/nginx/conf.d/default.conf
   echo "server {"
   echo "  listen 80;"
   echo "  root /usr/share/nginx/html;"
-  echo "  location / { try_files \$uri \$uri/ =404; }"
+  # Revalidate every time so a rebuilt dashboard is picked up without a hard refresh.
+  echo "  location / { try_files \$uri \$uri/ =404; add_header Cache-Control \"no-cache\"; }"
   echo "  location = /config.js { add_header Cache-Control no-store; }"
   if [ "$proxy" = true ]; then
     echo "  location = /api/dashboard {"

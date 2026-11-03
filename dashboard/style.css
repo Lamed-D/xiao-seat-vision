@@ -44,6 +44,11 @@ main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 16px
 .state-occupied { background: var(--occupied); }
 .state-empty { background: var(--empty); }
 .state-unknown { background: var(--unknown); }
+.people-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.people-list li { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.person-thumb { width: 100%; aspect-ratio: 3 / 4; background-color: #222; background-repeat: no-repeat; }
+.person-meta { padding: 6px 8px; font-size: .85rem; }
+.person-meta b { display: block; }
 .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .panel h2 { font-size: 1rem; margin: 0; }
