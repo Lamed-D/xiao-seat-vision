@@ -1,7 +1,7 @@
-// node --test dashboard/viewmodel.test.js
+// node --test dashboard/tests/viewmodel.test.js
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildViewModel } = require("./viewmodel.js");
+const { buildViewModel } = require("../static/viewmodel.js");
 
 const summary = {
   generated_at: "2026-11-03T10:00:00Z",
@@ -68,7 +68,7 @@ test("people: labels per person, seat text, scores only in developer mode", () =
 });
 
 test("index.html loads config.js, viewmodel.js, app.js in this order (app.js depends on both)", () => {
-  const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "index.html"), "utf8");
+  const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "static", "index.html"), "utf8");
   const order = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(order, ["config.js", "viewmodel.js", "app.js"]);
 });
@@ -80,30 +80,53 @@ test("app.js runs against a minimal DOM and renders counts (smoke test)", async 
   const elements = {};
   const makeEl = (id) => ({
     id, hidden: false, textContent: "", style: {}, src: "", returnValue: "",
-    elements: {}, children: [],
+    elements: {}, children: [], className: "", value: "", dataset: {},
+    classList: { toggle() {} },
     setAttribute() {}, removeAttribute() {}, append(...c) { this.children.push(...c); },
     replaceChildren() { this.children = []; }, addEventListener() {}, showModal() {},
   });
   const document = {
+    querySelectorAll: () => [],
     getElementById: (id) => (elements[id] ??= makeEl(id)),
     createElement: (t) => makeEl(t),
     createElementNS: (_ns, t) => makeEl(t),
     createTextNode: (t) => ({ text: t }),
   };
   const summary = { generated_at: "2026-11-03T10:00:00Z", counts: { total: 3, occupied: 1, empty: 2, unknown: 0 },
-    seats: [], snapshot: null, people: [] };
+    seats: [], snapshot: null, people: [], devices: [{ device_id: "xiao-01", online: true }] };
+  const feed = { since: "s", sit_downs: { total: 5, per_seat: {} }, events: [{ event_id: "e1", seat_id: "seat_01",
+    seat_label: "Seat 1", created_at: "2026-11-03T09:59:00Z", snapshot: { url: "https://x/a.jpg" },
+    person_crop: { x: 0.1, y: 0.2, width: 0.3, height: 0.6 } }] };
   const ctx = {
     window: {}, document, console, URL, setInterval() {}, localStorage: { getItem: () => null, setItem() {} },
     location: { origin: "http://127.0.0.1:8080" },
-    fetch: async () => ({ ok: true, json: async () => summary }),
+    fetch: async (u) => ({ ok: true, json: async () => (String(u).includes("events") ? feed : summary) }),
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   vm.runInContext('window.XSV_CONFIG = { apiUrl: "", proxy: true, proxyAdmin: true };', ctx);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "viewmodel.js"), "utf8"), ctx);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", "viewmodel.js"), "utf8"), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "static", "app.js"), "utf8"), ctx);
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(elements["c-total"].textContent, 3);
   assert.equal(elements["c-occupied"].textContent, 1);
   assert.equal(elements["error"].textContent, "");
+  assert.equal(elements["c-today"].textContent, 5);
+  assert.equal(elements["event-grid"].children.length, 1);
+  assert.equal(elements["live-text"].textContent, "장치 연결됨");
+});
+
+test("feed model: sit-down cards with box label, confidence only in developer mode", () => {
+  const { buildFeedModel, personBoxes } = require("../static/viewmodel.js");
+  const feed = { sit_downs: { total: 2, per_seat: { seat_01: 2 } }, events: [{ event_id: "e1", seat_id: "seat_01",
+    seat_label: "Seat 1", created_at: "2026-11-03T09:58:00Z", confidence: 0.8, snapshot: { url: "u" },
+    person_crop: { x: 0.1, y: 0.2, width: 0.3, height: 0.6 } }] };
+  const now = Date.parse("2026-11-03T10:00:00Z");
+  const off = buildFeedModel(feed, false, now);
+  assert.equal(off.todayTotal, 2);
+  assert.equal(off.items[0].ago, "2분 전");
+  assert.equal(off.items[0].box.label, "착석 · Seat 1");
+  assert.equal(buildFeedModel(feed, true, now).items[0].box.label, "착석 · Seat 1 0.80");
+  const boxes = personBoxes([{ index: 1, seat_label: null, crop: { x: 0, y: 0, width: 0.3, height: 0.6 } }]);
+  assert.equal(boxes[0].kind, "other");
 });

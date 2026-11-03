@@ -3,51 +3,93 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>xiao-seat-vision 좌석 현황</title>
+  <title>xiao-seat-vision 좌석 감지</title>
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <h1>좌석 현황</h1>
+    <div class="brand">
+      <h1>좌석 감지 모니터링</h1>
+      <span id="live-dot" class="live-dot" title="장치 연결 상태"></span><span id="live-text" class="muted small">확인 중</span>
+    </div>
     <div class="topbar-actions">
       <span id="data-badge" class="badge test" hidden>테스트 데이터</span>
       <button id="open-settings" class="icon-btn" aria-label="설정">⚙ 설정</button>
     </div>
   </header>
 
+  <nav class="tabs" role="tablist">
+    <button class="tab active" role="tab" data-tab="overview" aria-selected="true">전체 현황</button>
+    <button class="tab" role="tab" data-tab="events" aria-selected="false">이벤트 로그 <span id="events-badge" class="tab-badge" hidden></span></button>
+  </nav>
+
   <main>
     <section class="counts" aria-label="좌석 요약">
       <div class="count total"><span id="c-total">–</span><label>전체 좌석</label></div>
       <div class="count occupied"><span id="c-occupied">–</span><label>사용 중</label></div>
       <div class="count empty"><span id="c-empty">–</span><label>빈 좌석</label></div>
+      <div class="count today"><span id="c-today">–</span><label>최근 24시간 착석</label></div>
       <div class="count unknown" id="c-unknown-box" hidden><span id="c-unknown">–</span><label>확인 불가</label></div>
     </section>
 
-    <section class="view" aria-label="좌석 배치">
-      <div id="snapshot-wrap" class="snapshot-wrap" hidden>
-        <img id="snapshot" alt="최근 촬영 이미지">
-        <svg id="overlay" class="overlay" viewBox="0 0 1 1" preserveAspectRatio="none"></svg>
-        <div id="badges" class="badges"></div>
-      </div>
-      <p id="no-snapshot" class="muted">최근 촬영 이미지가 없습니다.</p>
-      <ul id="seat-list" class="seat-list"></ul>
-    </section>
+    <!-- ① 전체 현황 -->
+    <div id="tab-overview" class="tab-panel">
+      <div class="overview-grid">
+        <section class="view panel" aria-label="실시간 화면">
+          <div class="panel-head">
+            <h2>실시간 화면</h2>
+            <span id="snapshot-time" class="muted small"></span>
+          </div>
+          <div id="snapshot-wrap" class="snapshot-wrap" hidden>
+            <img id="snapshot" alt="최근 촬영 이미지">
+            <svg id="overlay" class="overlay" viewBox="0 0 1 1" preserveAspectRatio="none"></svg>
+            <div id="boxes" class="boxes"></div>
+            <div id="badges" class="badges"></div>
+          </div>
+          <p id="no-snapshot" class="muted">최근 촬영 이미지가 없습니다.</p>
+          <p class="muted small">박스는 AI가 찾은 사람의 중심 기준 표시 영역입니다(크기는 추정).</p>
+          <ul id="seat-list" class="seat-list"></ul>
+        </section>
 
-    <section id="people-section" class="panel" hidden>
-      <div class="panel-head"><h2>감지된 사람 <span id="people-count"></span></h2></div>
-      <p class="muted small">최근 촬영 이미지에서 사람별로 잘라 보여줍니다. 위치는 사람의 중심 기준이라 몸 전체가 정확히 맞지 않을 수 있습니다.</p>
-      <ul id="people-list" class="people-list"></ul>
-    </section>
-
-    <section id="stream-section" class="panel" hidden>
-      <div class="panel-head">
-        <h2>실시간 영상</h2>
-        <button id="stream-toggle" class="btn">스트리밍 켜기</button>
+        <aside class="side">
+          <section class="panel">
+            <div class="panel-head"><h2>최근 착석</h2><button class="link-btn" data-goto="events">전체 보기 →</button></div>
+            <ul id="recent-events" class="recent-list"></ul>
+            <p id="recent-empty" class="muted small">기록이 없습니다.</p>
+          </section>
+          <section id="people-section" class="panel" hidden>
+            <div class="panel-head"><h2>감지된 사람 <span id="people-count"></span></h2></div>
+            <ul id="people-list" class="people-list"></ul>
+          </section>
+        </aside>
       </div>
-      <p class="muted small">스트리밍은 장치 화면 확인용 보조 기능이며 좌석 감지는 항상 계속됩니다.</p>
-      <img id="stream" class="stream" alt="" hidden>
-    </section>
+
+      <section id="stream-section" class="panel" hidden>
+        <div class="panel-head">
+          <h2>실시간 영상</h2>
+          <button id="stream-toggle" class="btn">스트리밍 켜기</button>
+        </div>
+        <p class="muted small">스트리밍은 장치 화면 확인용 보조 기능이며 좌석 감지는 항상 계속됩니다.</p>
+        <img id="stream" class="stream" alt="" hidden>
+      </section>
+    </div>
+
+    <!-- ② 이벤트 로그 -->
+    <div id="tab-events" class="tab-panel" hidden>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>착석 감지 이벤트 로그</h2>
+          <label class="small">좌석
+            <select id="seat-filter"><option value="">전체</option></select>
+          </label>
+        </div>
+        <p class="muted small">사람이 좌석에 앉아 상태가 '사용 중'으로 바뀔 때마다 찍힌 사진입니다.</p>
+        <p id="events-message" class="notice" hidden></p>
+        <ul id="event-grid" class="event-grid"></ul>
+        <p id="events-empty" class="muted" hidden>아직 착석 이벤트가 없습니다.</p>
+      </section>
+    </div>
 
     <!-- Developer mode panels are created only when developer mode is ON (see app.js). -->
     <div id="dev-root"></div>
@@ -58,16 +100,24 @@
     <span id="error" class="error"></span>
   </footer>
 
+  <dialog id="viewer" class="viewer">
+    <form method="dialog">
+      <div class="viewer-head"><b id="viewer-title"></b><button class="icon-btn" value="close">닫기 ✕</button></div>
+      <div class="snapshot-wrap"><img id="viewer-img" alt=""><div id="viewer-boxes" class="boxes"></div></div>
+      <p id="viewer-meta" class="muted small"></p>
+    </form>
+  </dialog>
+
   <dialog id="settings">
     <form method="dialog" id="settings-form">
       <h2>설정</h2>
       <label>대시보드 API URL
-        <input name="apiUrl" type="url" placeholder="https://<ref>.supabase.co/functions/v1/dashboard-api" required>
+        <input name="apiUrl" type="url" placeholder="https://<ref>.supabase.co/functions/v1/dashboard-api">
       </label>
       <label>조회 토큰 (viewer)
         <input name="viewerToken" type="password" autocomplete="off" placeholder="비워두면 이 PC의 서버 토큰을 자동 사용">
       </label>
-      <p class="muted small">이 PC의 Docker 대시보드는 토큰을 서버에서 자동으로 붙여 줍니다. 다른 서버를 직접 조회할 때만 토큰을 입력하세요.</p>
+      <p class="muted small">이 PC의 대시보드 서버는 토큰을 서버에서 자동으로 붙여 줍니다. 다른 서버를 직접 조회할 때만 입력하세요.</p>
       <label class="check"><input name="testData" type="checkbox"> 테스트 영상 데이터 보기</label>
 
       <fieldset>

@@ -29,6 +29,7 @@
       title: `사람 ${p.index}`,
       seatText: p.seat_label ? `${p.seat_label}` : "좌석 밖",
       crop: p.crop,
+      imageUrl: p.image_url ?? null, // server-cut JPEG (dashboard server); CSS crop as fallback
     }));
     const vm = {
       counts: summary?.counts ?? { total: 0, occupied: 0, empty: 0, unknown: 0 },
@@ -82,7 +83,54 @@
     return vm;
   }
 
-  const api = { buildViewModel, STATE_TEXT };
+  // ---- detection boxes (helmet-detection style overlay) ----
+  // FOMO returns person centres; the box is the display window around the centre.
+  function personBoxes(people, devConfidence) {
+    return (people ?? []).map((p, i) => {
+      const onSeat = !!p.seat_label;
+      const conf = devConfidence?.[i];
+      return {
+        x: p.crop.x, y: p.crop.y, w: p.crop.width, h: p.crop.height,
+        kind: onSeat ? "seated" : "other",
+        label: `사람 ${p.index}${onSeat ? ` · ${p.seat_label}` : ""}${typeof conf === "number" ? ` ${conf.toFixed(2)}` : ""}`,
+      };
+    });
+  }
+
+  function timeAgo(iso, now) {
+    const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
+    if (s < 60) return `${s}초 전`;
+    if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+    if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+    return `${Math.floor(s / 86400)}일 전`;
+  }
+
+  /** Sit-down feed cards. Confidence only when developer mode is on (and the server sent it). */
+  function buildFeedModel(feed, devMode, now = Date.now()) {
+    const items = (feed?.events ?? []).map((e) => ({
+      key: e.event_id,
+      seatLabel: e.seat_label || e.seat_id,
+      time: new Date(e.created_at).toLocaleTimeString(),
+      date: new Date(e.created_at).toLocaleDateString(),
+      ago: timeAgo(e.created_at, now),
+      snapshotUrl: e.snapshot?.url ?? null,
+      personImageUrl: e.person_image_url ?? null,
+      box: e.person_crop
+        ? {
+          x: e.person_crop.x, y: e.person_crop.y, w: e.person_crop.width, h: e.person_crop.height,
+          kind: "seated",
+          label: `착석 · ${e.seat_label || e.seat_id}${devMode && typeof e.confidence === "number" ? ` ${e.confidence.toFixed(2)}` : ""}`,
+        }
+        : null,
+    }));
+    return {
+      todayTotal: feed?.sit_downs?.total ?? null,
+      perSeat: feed?.sit_downs?.per_seat ?? {},
+      items,
+    };
+  }
+
+  const api = { buildViewModel, buildFeedModel, personBoxes, timeAgo, STATE_TEXT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.XsvViewModel = api;
 })(typeof window !== "undefined" ? window : globalThis);

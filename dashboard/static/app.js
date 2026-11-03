@@ -1,11 +1,13 @@
 // xiao-seat-vision dashboard (static, no build step).
+// Tabs: ① 전체 현황 (live overview) ② 이벤트 로그 (photo log of sit-down events).
 // Settings live in localStorage of this browser only. Developer mode defaults to OFF.
 (function () {
   "use strict";
-  const { buildViewModel } = window.XsvViewModel;
+  const { buildViewModel, buildFeedModel, personBoxes } = window.XsvViewModel;
   const $ = (id) => document.getElementById(id);
+  const CFG = window.XSV_CONFIG || {};
   const DEFAULTS = {
-    apiUrl: (window.XSV_CONFIG && window.XSV_CONFIG.apiUrl) || "",
+    apiUrl: CFG.apiUrl || "",
     viewerToken: "",
     adminToken: "",
     devMode: false, // must stay OFF by default
@@ -15,33 +17,32 @@
   };
   const REFRESH_MS = 10000;
 
-  function loadSettings() {
-    try {
-      return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("xsv-settings") || "{}") };
-    } catch {
-      return { ...DEFAULTS };
-    }
-  }
-  function saveSettings(s) {
-    try {
-      localStorage.setItem("xsv-settings", JSON.stringify(s));
-    } catch { /* private mode: settings live for this page only */ }
-  }
-  let settings = loadSettings();
+  const store = {
+    get(k, d) {
+      try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; }
+    },
+    set(k, v) {
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ }
+    },
+  };
+  let settings = { ...DEFAULTS, ...store.get("xsv-settings", {}) };
   let streaming = false;
+  let lastFeed = null;
+  let lastSeenEvent = store.get("xsv-last-seen-event", null);
+  // #events / #overview in the URL selects the tab (shareable link); else last used tab.
+  let activeTab = typeof location !== "undefined" && /^#(events|overview)$/.test(location.hash || "")
+    ? location.hash.slice(1)
+    : store.get("xsv-tab", "overview");
 
-  const CFG = window.XSV_CONFIG || {};
-
-  // Token-less mode: the dashboard container proxies /api/dashboard and adds the
-  // tokens server-side (only when it was started with them, see compose.yaml).
-  // A token typed into the settings always takes precedence (direct call).
+  // ---------------------------------------------------------------- API
+  // Token-less mode: the dashboard server proxies /api/dashboard and adds the tokens
+  // server-side. A token typed into the settings takes precedence (direct call).
   function useProxy() {
     return !!CFG.proxy && !settings.viewerToken;
   }
   function adminAvailable() {
     return useProxy() ? !!CFG.proxyAdmin : !!settings.adminToken;
   }
-
   async function api(view, token) {
     let r;
     if (useProxy()) {
@@ -55,10 +56,15 @@
       if (settings.testData) url.searchParams.set("data", "test");
       r = await fetch(url, { headers: { "x-dashboard-token": token } });
     }
-    if (!r.ok) throw new Error(`${view}: HTTP ${r.status}`);
+    if (!r.ok) {
+      const err = new Error(`${view}: HTTP ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
     return r.json();
   }
 
+  // ---------------------------------------------------------------- helpers
   function el(tag, attrs = {}, text) {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
@@ -66,7 +72,51 @@
     return e;
   }
 
-  function renderBasic(vm) {
+  /** Helmet-detection style boxes with labels, positioned in % of the image. */
+  function drawBoxes(container, boxes) {
+    if (!container) return;
+    container.replaceChildren();
+    for (const b of boxes) {
+      if (!b) continue;
+      const d = el("div", { class: `det-box det-${b.kind}` });
+      d.style.left = `${b.x * 100}%`;
+      d.style.top = `${b.y * 100}%`;
+      d.style.width = `${b.w * 100}%`;
+      d.style.height = `${b.h * 100}%`;
+      d.append(el("span", { class: "det-label" }, b.label));
+      container.append(d);
+    }
+  }
+
+  function showTab(name) {
+    activeTab = name === "events" ? "events" : "overview";
+    store.set("xsv-tab", activeTab);
+    if (typeof history !== "undefined" && history.replaceState) history.replaceState(null, "", `#${activeTab}`);
+    for (const t of document.querySelectorAll(".tab")) {
+      const on = t.dataset.tab === activeTab;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    $("tab-overview").hidden = activeTab !== "overview";
+    $("tab-events").hidden = activeTab !== "events";
+    if (activeTab === "events" && lastFeed?.items.length) {
+      lastSeenEvent = lastFeed.items[0].key;
+      store.set("xsv-last-seen-event", lastSeenEvent);
+      $("events-badge").hidden = true;
+    }
+  }
+
+  function openViewer(item) {
+    if (!item.snapshotUrl) return;
+    $("viewer-title").textContent = `${item.seatLabel} 착석`;
+    $("viewer-img").src = item.snapshotUrl;
+    drawBoxes($("viewer-boxes"), [item.box]);
+    $("viewer-meta").textContent = `${item.date} ${item.time} (${item.ago})`;
+    $("viewer").showModal();
+  }
+
+  // ---------------------------------------------------------------- overview
+  function renderBasic(vm, summary) {
     $("c-total").textContent = vm.counts.total;
     $("c-occupied").textContent = vm.counts.occupied;
     $("c-empty").textContent = vm.counts.empty;
@@ -74,10 +124,17 @@
     $("c-unknown-box").hidden = vm.counts.unknown === 0;
     $("data-badge").hidden = !settings.testData;
 
+    const online = (summary.devices ?? []).some((d) => d.online);
+    $("live-dot").className = `live-dot ${online ? "on" : "off"}`;
+    $("live-text").textContent = online ? "장치 연결됨" : "장치 연결 안 됨";
+
     const hasSnap = !!vm.snapshotUrl;
     $("snapshot-wrap").hidden = !hasSnap;
     $("no-snapshot").hidden = hasSnap;
     if (hasSnap && $("snapshot").src !== vm.snapshotUrl) $("snapshot").src = vm.snapshotUrl;
+    $("snapshot-time").textContent = summary.snapshot
+      ? `촬영 ${new Date(summary.snapshot.created_at).toLocaleTimeString()}`
+      : "";
 
     const badges = $("badges");
     badges.replaceChildren();
@@ -94,11 +151,10 @@
       li.append(el("span", { class: "name" }, s.label), el("span", { class: "detail" }, s.stateText));
       list.append(li);
     }
+    drawBoxes($("boxes"), personBoxes(summary.people, vm.dev?.personConfidence));
     $("updated").textContent = vm.updatedAt ? new Date(vm.updatedAt).toLocaleString() : "–";
   }
 
-  // Shows a crop of the snapshot without canvas (no CORS needed): the image is used as a
-  // background scaled so that the crop window fills the thumbnail.
   function renderPeople(vm) {
     const list = $("people-list");
     list.replaceChildren();
@@ -106,13 +162,18 @@
     $("people-count").textContent = vm.people.length ? `(${vm.people.length}명)` : "";
     vm.people.forEach((p, i) => {
       const li = el("li");
-      const thumb = el("div", { class: "person-thumb", role: "img", "aria-label": p.title });
-      const c = p.crop;
-      thumb.style.backgroundImage = `url("${vm.snapshotUrl}")`;
-      thumb.style.backgroundSize = `${100 / c.width}% ${100 / c.height}%`;
-      thumb.style.backgroundPosition = `${c.width >= 1 ? 0 : (c.x / (1 - c.width)) * 100}% ${
-        c.height >= 1 ? 0 : (c.y / (1 - c.height)) * 100
-      }%`;
+      let thumb;
+      if (p.imageUrl) {
+        thumb = el("img", { class: "person-thumb", src: p.imageUrl, alt: p.title });
+      } else {
+        thumb = el("div", { class: "person-thumb", role: "img", "aria-label": p.title });
+        const c = p.crop;
+        thumb.style.backgroundImage = `url("${vm.snapshotUrl}")`;
+        thumb.style.backgroundSize = `${100 / c.width}% ${100 / c.height}%`;
+        thumb.style.backgroundPosition = `${c.width >= 1 ? 0 : (c.x / (1 - c.width)) * 100}% ${
+          c.height >= 1 ? 0 : (c.y / (1 - c.height)) * 100
+        }%`;
+      }
       const meta = el("div", { class: "person-meta" });
       meta.append(el("b", {}, p.title), document.createTextNode(p.seatText));
       const conf = vm.dev?.personConfidence?.[i];
@@ -125,7 +186,7 @@
   function renderOverlay(vm) {
     const svg = $("overlay");
     svg.replaceChildren();
-    if (!vm.dev) return; // ROI lines and markers only in developer mode
+    if (!vm.dev) return; // ROI outlines only in developer mode
     const ns = "http://www.w3.org/2000/svg";
     for (const s of vm.dev.seats) {
       if (!s.roi) continue;
@@ -153,6 +214,77 @@
     }
   }
 
+  // ---------------------------------------------------------------- event log
+  function eventCard(item, big) {
+    const li = el("li", { class: `event-card${big ? "" : " compact"}` });
+    const media = el("div", { class: "event-media snapshot-wrap" });
+    if (item.snapshotUrl) {
+      media.append(el("img", { src: item.snapshotUrl, alt: `${item.seatLabel} 착석 사진`, loading: "lazy" }));
+      const boxes = el("div", { class: "boxes" });
+      media.append(boxes);
+      drawBoxes(boxes, [item.box]);
+    } else {
+      media.append(el("div", { class: "no-photo" }, "사진 없음"));
+    }
+    const meta = el("div", { class: "event-meta" });
+    meta.append(
+      el("span", { class: "event-tag" }, "착석"),
+      el("b", {}, item.seatLabel),
+      el("span", { class: "muted small" }, `${item.time} · ${item.ago}`),
+    );
+    if (item.personImageUrl && big) {
+      meta.append(el("img", { class: "event-person", src: item.personImageUrl, alt: "사람", loading: "lazy" }));
+    }
+    li.append(media, meta);
+    li.addEventListener("click", () => openViewer(item));
+    return li;
+  }
+
+  function renderFeed(feed) {
+    lastFeed = feed;
+    $("c-today").textContent = feed.todayTotal ?? "–";
+
+    const recent = $("recent-events");
+    recent.replaceChildren();
+    for (const it of feed.items.slice(0, 4)) recent.append(eventCard(it, false));
+    $("recent-empty").hidden = feed.items.length > 0;
+
+    // seat filter options
+    const sel = $("seat-filter");
+    const current = sel.value;
+    const seats = [...new Set(feed.items.map((i) => i.seatLabel))].sort();
+    sel.replaceChildren(el("option", { value: "" }, "전체"), ...seats.map((s) => el("option", { value: s }, s)));
+    sel.value = seats.includes(current) ? current : "";
+
+    const grid = $("event-grid");
+    grid.replaceChildren();
+    const shown = feed.items.filter((i) => !sel.value || i.seatLabel === sel.value);
+    for (const it of shown) grid.append(eventCard(it, true));
+    $("events-empty").hidden = shown.length > 0;
+
+    // "new events" badge on the tab
+    const idx = feed.items.findIndex((i) => i.key === lastSeenEvent);
+    const fresh = idx === -1 ? feed.items.length : idx;
+    if (activeTab === "events") {
+      if (feed.items.length) {
+        lastSeenEvent = feed.items[0].key;
+        store.set("xsv-last-seen-event", lastSeenEvent);
+      }
+      $("events-badge").hidden = true;
+    } else {
+      $("events-badge").hidden = fresh === 0;
+      $("events-badge").textContent = fresh > 99 ? "99+" : String(fresh);
+    }
+  }
+
+  function feedUnavailable(message) {
+    $("c-today").textContent = "–";
+    $("events-message").hidden = false;
+    $("events-message").textContent = message;
+    $("recent-empty").hidden = false;
+  }
+
+  // ---------------------------------------------------------------- developer
   function kv(label, value) {
     const d = el("div", { class: "kv" });
     d.append(el("b", {}, label), document.createTextNode(value ?? "–"));
@@ -201,11 +333,12 @@
       kv("감지 중심점", `${vm.dev.detections.length}개`),
     );
     for (const d of vm.dev.devices) {
-      g.append(kv(`MQTT ${d.deviceId}`, `${d.status}, 마지막 수신 ${d.lastSeen ? new Date(d.lastSeen).toLocaleTimeString() : "–"}, 입력 ${d.inputMode ?? "–"}`));
+      g.append(kv(`MQTT ${d.deviceId}`,
+        `${d.status}, 마지막 수신 ${d.lastSeen ? new Date(d.lastSeen).toLocaleTimeString() : "–"}, 입력 ${d.inputMode ?? "–"}`));
     }
     panel.append(g);
 
-    panel.append(el("h2", {}, "최근 이벤트"));
+    panel.append(el("h2", {}, "최근 이벤트 (원시)"));
     const ev = el("table");
     for (const e of vm.dev.recentEvents) {
       const tr = el("tr");
@@ -220,6 +353,7 @@
     root.append(panel);
   }
 
+  // ---------------------------------------------------------------- refresh
   async function refresh() {
     $("error").textContent = "";
     if (!useProxy() && (!settings.apiUrl || !settings.viewerToken)) {
@@ -227,26 +361,37 @@
       return;
     }
     try {
-      const summary = await api("summary", settings.viewerToken);
+      const [summary, feedRaw] = await Promise.all([
+        api("summary", settings.viewerToken),
+        api("events", settings.viewerToken).catch((e) => ({ __error: e })),
+      ]);
       let debug = null;
       if (settings.devMode && adminAvailable()) {
         try {
           debug = await api("debug", settings.adminToken); // fetched only in developer mode
-        } catch (e) {
+        } catch {
           debug = null;
         }
       }
       const vm = buildViewModel(summary, debug, settings.devMode);
-      renderBasic(vm);
+      renderBasic(vm, summary);
       renderPeople(vm);
       renderOverlay(vm);
       renderDev(vm);
+      if (feedRaw.__error) {
+        feedUnavailable(feedRaw.__error.status === 501 || feedRaw.__error.status === 404
+          ? "이벤트 로그를 보려면 Supabase 함수 업데이트가 필요합니다: python scripts/supabase_cli.py functions deploy dashboard-api --use-api"
+          : `이벤트 로그를 불러오지 못했습니다 (${feedRaw.__error.message})`);
+      } else {
+        $("events-message").hidden = true;
+        renderFeed(buildFeedModel(feedRaw, settings.devMode));
+      }
     } catch (e) {
       $("error").textContent = `불러오기 실패: ${e.message}`;
     }
   }
 
-  // ---- optional live stream (independent of developer mode) ----
+  // ---------------------------------------------------------------- streaming
   function streamUrl() {
     const u = new URL(settings.esp32Url);
     return `${u.protocol}//${u.hostname}:81/stream?token=${encodeURIComponent(settings.esp32Token)}&t=${Date.now()}`;
@@ -278,6 +423,10 @@
     $("stream-section").hidden = !(settings.esp32Url && settings.esp32Token);
   }
 
+  // ---------------------------------------------------------------- wiring
+  for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showTab(t.dataset.tab));
+  for (const b of document.querySelectorAll("[data-goto]")) b.addEventListener("click", () => showTab(b.dataset.goto));
+  $("seat-filter").addEventListener("change", () => lastFeed && renderFeed(lastFeed));
   $("stream-toggle").addEventListener("click", () => setStream(!streaming));
   $("open-settings").addEventListener("click", () => {
     const f = $("settings-form");
@@ -297,12 +446,13 @@
       next[k] = f.elements[k].type === "checkbox" ? f.elements[k].checked : f.elements[k].value.trim();
     }
     settings = next;
-    saveSettings(settings);
+    store.set("xsv-settings", settings);
     applySettingsUi();
     refresh();
   });
 
   applySettingsUi();
+  showTab(activeTab);
   refresh();
   setInterval(refresh, REFRESH_MS);
 })();
