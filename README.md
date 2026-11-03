@@ -477,6 +477,11 @@ static const SeatRoi kSeats[] = {
 
 ## 11. 대시보드 사용법
 
+> 대시보드 서버는 **FastAPI + uvicorn**입니다(`dashboard/app`). API 문서: http://127.0.0.1:8080/docs
+> - **전체 현황** 탭: 좌석 수·사용 중·빈 좌석·최근 24시간 착석 수, 실시간 사진 위 **탐지 박스**("사람 1 · Seat 1"), 사람별 사진, 최근 착석
+> - **이벤트 로그** 탭(`http://127.0.0.1:8080/#events`): 안전모 이벤트처럼 **사람이 앉을 때마다 찍힌 사진 카드**(좌석·시각·박스), 좌석 필터, 클릭 시 크게 보기
+> - 이벤트 로그는 Supabase 함수 업데이트가 필요합니다: `python scripts/supabase_cli.py functions deploy dashboard-api --use-api`
+
 1. 브라우저에서 **http://127.0.0.1:8080** → 바로 좌석 현황이 보입니다. **토큰 입력 불필요**.
    - `.env`에 `DASHBOARD_VIEWER_TOKEN`, `DASHBOARD_ADMIN_TOKEN`이 있으면(`scripts/setup_local.py`가 자동으로 채움)
      대시보드 컨테이너가 Supabase 호출에 토큰을 **서버에서 대신 붙여 줍니다**. 토큰은 브라우저로 내려가지 않습니다.
