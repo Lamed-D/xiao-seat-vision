@@ -1,9 +1,9 @@
 """xiao-seat-vision test-video feeder (virtual camera).
 
 Plays an MP4 from ./test-videos, samples frames at a fixed FPS and either
-  TARGET=esp32 : POSTs JPEG frames to the ESP32 (/api/test-frame). The device runs
-                 the SAME Edge Impulse pipeline as for camera frames -> validates
-                 on-device AI. Requires the real board.
+  TARGET=esp32 : sends JPEG frames to the board over MQTT (<prefix>/<device>/test-frame).
+                 The device runs the SAME Edge Impulse pipeline as for camera frames ->
+                 validates on-device AI. Requires the real board (connected to the broker).
   TARGET=mqtt  : no ESP32. Publishes test events (is_test=true, source=test_video)
                  derived from a ground-truth labels CSV (not AI!) plus JPEG snapshots,
                  to validate MQTT -> bridge -> Supabase -> dashboard.
@@ -29,7 +29,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import paho.mqtt.client as mqtt
-import requests
 from paho.mqtt.enums import CallbackAPIVersion
 
 from feeder import Annotations, ChangeDetector, PlayerConfig, VideoSource
@@ -42,42 +41,52 @@ def env_bool(name: str, default: bool) -> bool:
     return os.environ.get(name, str(default)).lower() in ("1", "true", "yes")
 
 
+def mqtt_client(client_id: str, username: str, password: str) -> mqtt.Client:
+    c = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2, client_id=client_id)
+    c.username_pw_set(username, password)
+    if env_bool("MQTT_TLS", True):  # verification stays on
+        c.tls_set(ca_certs=os.environ.get("MQTT_CA_CERT") or None,
+                  cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+    return c
+
+
 class Esp32Sink:
-    """Synchronous POST: if the ESP32 is slower than the feed, the next frame is
-    simply sent later (frames are skipped, never queued)."""
+    """Feeds the real board through the MQTT broker (<prefix>/<device>/cmd + test-frame).
+
+    The device opened the MQTT connection itself, so this also works on networks where
+    the PC cannot reach the board directly. QoS 0 frames; the device keeps only the
+    newest unprocessed frame, so nothing piles up when the feed is faster than inference.
+    """
 
     def __init__(self) -> None:
-        self.base = os.environ["ESP32_URL"].rstrip("/")  # e.g. http://192.168.0.42
-        self.token = os.environ["ESP32_WEB_TOKEN"]
-        self.session = requests.Session()
-        self.last_result: dict | None = None
+        self.device = os.environ.get("DEVICE_ID", "xiao-01")
+        self.prefix = os.environ.get("MQTT_TOPIC_PREFIX", "xiao-seat-vision")
+        self.client = mqtt_client(f"xiao-seat-vision-feeder-{secrets.token_hex(3)}",
+                                  os.environ.get("FEEDER_MQTT_USERNAME", "xiao-seat-vision-feeder"),
+                                  os.environ["FEEDER_MQTT_PASSWORD"])
+        self.client.connect(os.environ.get("MQTT_HOST", "mosquitto"), int(os.environ.get("MQTT_PORT", "8883")), 30)
+        self.client.loop_start()
+
+    def _cmd(self, payload: dict) -> None:
+        self.client.publish(f"{self.prefix}/{self.device}/cmd", json.dumps(payload, separators=(",", ":")),
+                            qos=1).wait_for_publish(10)
 
     def start(self) -> None:
-        r = self.session.post(f"{self.base}/api/mode", params={"mode": "test_video", "token": self.token}, timeout=5)
-        r.raise_for_status()
-        log.info("ESP32 switched to %s", r.json().get("mode"))
+        self._cmd({"cmd": "mode", "mode": "test_video"})
+        log.info("device %s switched to test_video (MQTT)", self.device)
 
     def stop(self) -> None:
         try:
-            self.session.post(f"{self.base}/api/mode", params={"mode": "live_camera", "token": self.token}, timeout=5)
-            log.info("ESP32 switched back to live_camera")
-        except requests.RequestException as exc:
-            log.warning("could not switch ESP32 back to live_camera: %s", exc)
+            self._cmd({"cmd": "mode", "mode": "live_camera"})
+            log.info("device %s switched back to live_camera", self.device)
+        finally:
+            self.client.loop_stop()
+            self.client.disconnect()
 
     def send(self, frame, _t: float) -> None:
-        r = self.session.post(
-            f"{self.base}/api/test-frame",
-            params={"token": self.token},
-            data=frame.jpeg,
-            headers={"content-type": "image/jpeg"},
-            timeout=10,
-        )
-        if r.status_code == 202:
-            self.last_result = r.json()
-            log.info("frame %d accepted, device dropped=%s last_result=%s", frame.index,
-                     self.last_result.get("dropped"), self.last_result.get("last_result"))
-        else:
-            log.warning("frame %d rejected: HTTP %s %s", frame.index, r.status_code, r.text[:200])
+        self.client.publish(f"{self.prefix}/{self.device}/test-frame", frame.jpeg, qos=0)
+        if frame.index % 10 == 0:
+            log.info("frame %d sent to %s (%d bytes)", frame.index, self.device, len(frame.jpeg))
 
 
 class MqttSink:
