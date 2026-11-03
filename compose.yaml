@@ -67,10 +67,19 @@ services:
       # the browser needs none. Leave empty to require tokens in the dashboard settings.
       DASHBOARD_VIEWER_TOKEN: ${DASHBOARD_VIEWER_TOKEN:-}
       DASHBOARD_ADMIN_TOKEN: ${DASHBOARD_ADMIN_TOKEN:-}
-      # Developer "테스트 모드" (camera ON/OFF, test video, test image). Optional.
-      ESP32_URL: ${ESP32_URL:-}
-      ESP32_WEB_TOKEN: ${ESP32_WEB_TOKEN:-}
+      # Developer "테스트 모드" (camera ON/OFF, test video, test image) via the MQTT broker.
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "8883"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_USERNAME: xiao-seat-vision-dashboard
+      MQTT_PASSWORD: ${DASHBOARD_MQTT_PASSWORD:-}
+      DEVICE_ID: ${DEVICE_ID:-xiao-01}
       FEEDER_URL: ${FEEDER_URL:-http://video-feeder:8090}
+    volumes:
+      - ./mqtt/certs/public:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
 
   video-feeder:
     profiles: ["test-video"]
@@ -82,6 +91,9 @@ services:
         required: false
     environment:
       VIDEO_DIR: /videos
+      FEEDER_MQTT_USERNAME: xiao-seat-vision-feeder
+      FEEDER_MQTT_PASSWORD: ${FEEDER_MQTT_PASSWORD:-}
+      DEVICE_ID: ${DEVICE_ID:-xiao-01}
       MQTT_HOST: mosquitto
       MQTT_PORT: "8883"
       MQTT_CA_CERT: /certs/ca.crt

@@ -1,11 +1,16 @@
 # xiao-seat-vision MQTT ACL (Mosquitto). Deny-by-default: anything not listed is refused.
 #
-# Devices: MQTT username MUST equal the device_id. Each device may only publish
-# to its own topics. %u is replaced by the username.
+# Devices: MQTT username MUST equal the device_id. %u is replaced by the username.
+# Uplink (device -> broker): only its own topics.
 pattern write xiao-seat-vision/%u/events
 pattern write xiao-seat-vision/%u/status
 pattern write xiao-seat-vision/%u/telemetry
 pattern write xiao-seat-vision/%u/snapshot
+pattern write xiao-seat-vision/%u/stream
+pattern write xiao-seat-vision/%u/test-result
+# Downlink (broker -> device): only its own command and test-frame topics.
+pattern read xiao-seat-vision/%u/cmd
+pattern read xiao-seat-vision/%u/test-frame
 
 # Bridge: read everything it forwards to Supabase.
 user xiao-seat-vision-bridge
@@ -13,6 +18,19 @@ topic read xiao-seat-vision/+/events
 topic read xiao-seat-vision/+/status
 topic read xiao-seat-vision/+/telemetry
 topic read xiao-seat-vision/+/snapshot
+
+# Dashboard server (developer test mode): send commands/test frames, read preview/results.
+user xiao-seat-vision-dashboard
+topic write xiao-seat-vision/+/cmd
+topic write xiao-seat-vision/+/test-frame
+topic read xiao-seat-vision/+/stream
+topic read xiao-seat-vision/+/test-result
+topic read xiao-seat-vision/+/status
+
+# Video feeder (TARGET=esp32): play an MP4 into the device as test frames.
+user xiao-seat-vision-feeder
+topic write xiao-seat-vision/+/cmd
+topic write xiao-seat-vision/+/test-frame
 
 # Container healthcheck: may only read the broker uptime.
 user healthcheck

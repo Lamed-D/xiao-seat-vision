@@ -122,6 +122,8 @@ def main() -> None:
     dev_pw = ensure_user(device_id)
     bridge_pw = ensure_user("xiao-seat-vision-bridge")
     hc_pw = ensure_user("healthcheck")
+    dash_pw = ensure_user("xiao-seat-vision-dashboard")  # developer test mode (MQTT)
+    feeder_pw = ensure_user("xiao-seat-vision-feeder")  # test video -> device (MQTT)
 
     # 4. config.h MQTT fields
     changed = []
@@ -151,6 +153,11 @@ def main() -> None:
         shutil.copyfile(ROOT / ".env.example", env)
     if hc_pw:
         env_set(env, "MQTT_HEALTHCHECK_PASSWORD", hc_pw, only_if_placeholder=False)
+    if dash_pw:
+        env_set(env, "DASHBOARD_MQTT_PASSWORD", dash_pw, only_if_placeholder=False)
+    if feeder_pw:
+        env_set(env, "FEEDER_MQTT_PASSWORD", feeder_pw, only_if_placeholder=False)
+    env_set(env, "DEVICE_ID", device_id)
     # MQTT_BIND_ADDRESS stays 0.0.0.0 (works when DHCP changes the PC's IP); set it to
     # the LAN IP manually to avoid listening on other interfaces.
     if args.supabase_ref:
