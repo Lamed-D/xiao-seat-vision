@@ -60,6 +60,27 @@ bool jpegSize(const uint8_t* d, size_t len, uint16_t* w, uint16_t* h) {
   return false;
 }
 
+// Copies a validated JPEG into the pending slot (caller-agnostic). Returns error text or nullptr.
+const char* storeFrame(const uint8_t* data, size_t len) {
+  if (s_mutex == nullptr || s_pending == nullptr) return "test input not initialised";
+  if (len == 0 || len > kMaxFrameBytes) return "jpeg must be 1..65536 bytes";
+  uint16_t w = 0;
+  uint16_t h = 0;
+  if (!jpegSize(data, len, &w, &h) || w > kMaxWidth || h > kMaxHeight) {
+    return "not a baseline JPEG or larger than 640x480";
+  }
+  if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(500)) != pdTRUE) return "busy";
+  if (s_pendingFresh) ++s_dropped;  // previous frame was never processed
+  memcpy(s_pending, data, len);
+  s_pendingLen = len;
+  s_pendingW = w;
+  s_pendingH = h;
+  s_pendingFresh = true;
+  ++s_received;
+  xSemaphoreGive(s_mutex);
+  return nullptr;
+}
+
 esp_err_t sendJson(httpd_req_t* req, const char* status, const char* body) {
   httpd_resp_set_status(req, status);
   httpd_resp_set_type(req, "application/json");
@@ -80,10 +101,7 @@ esp_err_t handleMode(httpd_req_t* req) {
     } else {
       return sendJson(req, "400 Bad Request", "{\"error\":\"mode must be live_camera|test_video\"}");
     }
-    if (s_mode.exchange(static_cast<uint8_t>(m)) != static_cast<uint8_t>(m)) {
-      s_generation.fetch_add(1);
-      Serial.printf("[input] mode -> %s\n", testinput::modeName());
-    }
+    testinput::setMode(m);
   }
   char body[64];
   snprintf(body, sizeof(body), "{\"mode\":\"%s\"}", testinput::modeName());
@@ -113,30 +131,21 @@ esp_err_t handleFrame(httpd_req_t* req) {
     got += static_cast<size_t>(r);
   }
 
-  uint16_t w = 0;
-  uint16_t h = 0;
-  if (!jpegSize(tmp, len, &w, &h) || w > kMaxWidth || h > kMaxHeight) {
-    heap_caps_free(tmp);
-    return sendJson(req, "422 Unprocessable Entity",
-                    "{\"error\":\"not a baseline JPEG or larger than 640x480\"}");
-  }
-
-  char body[256];
-  if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
-    heap_caps_free(tmp);
-    return sendJson(req, "503 Service Unavailable", "{\"error\":\"busy\"}");
-  }
-  if (s_pendingFresh) ++s_dropped;  // previous frame was never processed
-  memcpy(s_pending, tmp, len);
-  s_pendingLen = len;
-  s_pendingW = w;
-  s_pendingH = h;
-  s_pendingFresh = true;
-  ++s_received;
-  snprintf(body, sizeof(body), "{\"accepted\":true,\"received\":%lu,\"dropped\":%lu,\"last_result\":%s}",
-           static_cast<unsigned long>(s_received), static_cast<unsigned long>(s_dropped), s_lastResult);
-  xSemaphoreGive(s_mutex);
+  const char* err = storeFrame(tmp, len);
   heap_caps_free(tmp);
+  if (err != nullptr) {
+    char e[96];
+    snprintf(e, sizeof(e), "{\"error\":\"%s\"}", err);
+    return sendJson(req, strcmp(err, "busy") == 0 ? "503 Service Unavailable" : "422 Unprocessable Entity", e);
+  }
+  char body[256];
+  if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    snprintf(body, sizeof(body), "{\"accepted\":true,\"received\":%lu,\"dropped\":%lu,\"last_result\":%s}",
+             static_cast<unsigned long>(s_received), static_cast<unsigned long>(s_dropped), s_lastResult);
+    xSemaphoreGive(s_mutex);
+  } else {
+    snprintf(body, sizeof(body), "{\"accepted\":true}");
+  }
   return sendJson(req, "202 Accepted", body);
 }
 
@@ -145,17 +154,17 @@ esp_err_t handleFrame(httpd_req_t* req) {
 namespace testinput {
 
 bool begin() {
-  httpd_handle_t server = stream::controlServer();
-  if (server == nullptr) {
-    Serial.println("[input] TEST_VIDEO unavailable (web server not running) - LIVE_CAMERA only");
-    return false;
-  }
   s_mutex = xSemaphoreCreateMutex();
   s_pending = static_cast<uint8_t*>(heap_caps_malloc(kMaxFrameBytes, MALLOC_CAP_SPIRAM));
   s_loopBuf = static_cast<uint8_t*>(heap_caps_malloc(kMaxFrameBytes, MALLOC_CAP_SPIRAM));
   if (s_mutex == nullptr || s_pending == nullptr || s_loopBuf == nullptr) {
     Serial.println("[input] TEST_VIDEO unavailable (allocation failed)");
     return false;
+  }
+  httpd_handle_t server = stream::controlServer();
+  if (server == nullptr) {
+    Serial.println("[input] TEST_VIDEO via MQTT only (web server not running)");
+    return true;
   }
   httpd_uri_t modeUri = {"/api/mode", HTTP_POST, handleMode, nullptr};
   httpd_uri_t frameUri = {"/api/test-frame", HTTP_POST, handleFrame, nullptr};
@@ -166,6 +175,15 @@ bool begin() {
 }
 
 InputMode mode() { return static_cast<InputMode>(s_mode.load()); }
+
+void setMode(InputMode m) {
+  if (s_mode.exchange(static_cast<uint8_t>(m)) != static_cast<uint8_t>(m)) {
+    s_generation.fetch_add(1);
+    Serial.printf("[input] mode -> %s\n", modeName());
+  }
+}
+
+const char* submitFrame(const uint8_t* jpeg, size_t len) { return storeFrame(jpeg, len); }
 
 const char* modeName() { return mode() == InputMode::TestVideo ? "test_video" : "live_camera"; }
 

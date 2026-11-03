@@ -12,6 +12,9 @@
 
 #include <Arduino.h>
 #include <esp_system.h>
+#include <string.h>
+
+#include <atomic>
 
 #include "app_config.h"
 #include "camera_manager.h"
@@ -46,6 +49,83 @@ uint32_t g_lastTelemetryMs = 0;
 uint32_t g_lastSnapshotMs = 0;
 bool g_configValid = false;
 uint32_t g_modeGeneration = 0;
+
+// Remote preview over MQTT (dashboard test mode): frames are published to
+// <prefix>/<device>/stream while this deadline is in the future. Set from the esp-mqtt
+// task by the "stream" command; the dashboard renews it while someone is watching.
+constexpr uint32_t kRemoteStreamPeriodMs = 500;   // 2 fps
+constexpr uint32_t kRemoteStreamMaxS = 120;
+std::atomic<uint32_t> g_remoteStreamUntilMs{0};
+uint32_t g_lastRemoteFrameMs = 0;
+
+bool remoteStreamActive(uint32_t now) {
+  return static_cast<int32_t>(g_remoteStreamUntilMs.load() - now) > 0;
+}
+
+// Minimal JSON helpers for the small, trusted-format command payloads.
+bool jsonHas(const char* json, const char* needle) { return strstr(json, needle) != nullptr; }
+long jsonInt(const char* json, const char* key, long fallback) {
+  const char* k = strstr(json, key);
+  if (k == nullptr) return fallback;
+  k = strchr(k + strlen(key), ':');
+  return k ? strtol(k + 1, nullptr, 10) : fallback;
+}
+
+// Runs in the esp-mqtt task: only thread-safe calls here.
+void onDownlink(const char* subtopic, const uint8_t* data, size_t len) {
+  if (strcmp(subtopic, "test-frame") == 0) {
+    const char* err = testinput::submitFrame(data, len);
+    if (err != nullptr) Serial.printf("[input] MQTT test frame rejected: %s\n", err);
+    return;
+  }
+  if (strcmp(subtopic, "cmd") != 0) return;
+  // Copy without whitespace so {"cmd": "stream"} and {"cmd":"stream"} both match.
+  char cmd[160];
+  size_t n = 0;
+  for (size_t i = 0; i < len && n < sizeof(cmd) - 1; ++i) {
+    const char c = static_cast<char>(data[i]);
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') cmd[n++] = c;
+  }
+  cmd[n] = '\0';
+  if (jsonHas(cmd, "\"cmd\":\"mode\"")) {
+    if (jsonHas(cmd, "\"test_video\"")) testinput::setMode(testinput::InputMode::TestVideo);
+    else if (jsonHas(cmd, "\"live_camera\"")) testinput::setMode(testinput::InputMode::LiveCamera);
+  } else if (jsonHas(cmd, "\"cmd\":\"stream\"")) {
+    if (jsonHas(cmd, "\"enable\":true")) {
+      long secs = jsonInt(cmd, "\"seconds\"", 60);
+      if (secs < 5) secs = 5;
+      if (secs > static_cast<long>(kRemoteStreamMaxS)) secs = kRemoteStreamMaxS;
+      const bool wasOn = remoteStreamActive(millis());
+      g_remoteStreamUntilMs = millis() + static_cast<uint32_t>(secs) * 1000;
+      if (!wasOn) Serial.printf("[stream] MQTT preview ON (%lds)\n", secs);
+    } else {
+      g_remoteStreamUntilMs = millis();
+      Serial.println("[stream] MQTT preview OFF");
+    }
+  } else {
+    Serial.printf("[mqtt] unknown command: %s\n", cmd);
+  }
+}
+
+void publishTestResult(const InferenceResult& r) {
+  char json[192];
+  int n = snprintf(json, sizeof(json),
+                   "{\"status\":\"%s\",\"persons\":%u,\"state\":\"%s\",\"inference_ms\":%lu,"
+                   "\"uptime_ms\":%lu}",
+                   inference::statusToString(r.status), r.detectionCount, seatStateToString(r.state),
+                   static_cast<unsigned long>(r.inferenceMs), static_cast<unsigned long>(millis()));
+  if (n > 0) mqtt::publishRaw("test-result", json, static_cast<size_t>(n));
+}
+
+void publishRemoteFrame(uint32_t now) {
+  if (!remoteStreamActive(now) || now - g_lastRemoteFrameMs < kRemoteStreamPeriodMs) return;
+  g_lastRemoteFrameMs = now;
+  if (!mqtt::connected() || testinput::mode() == testinput::InputMode::TestVideo) return;
+  camera::FrameGuard fb(camera::capture());
+  if (fb && fb.get()->format == PIXFORMAT_JPEG) {
+    mqtt::publishRaw("stream", reinterpret_cast<const char*>(fb.get()->buf), fb.get()->len);
+  }
+}  // frame buffer returned here
 
 // Perf bookkeeping for telemetry
 InferenceResult g_lastResult;
@@ -245,6 +325,7 @@ void processResult(const camera_fb_t* fb, const InferenceResult& r, bool isTest)
 void handleResult(const camera_fb_t* fb, const InferenceResult& r, bool isTest) {
   testinput::reportResult(inference::statusToString(r.status), seatStateToString(r.state),
                           r.confidence, r.inferenceMs);
+  if (isTest) publishTestResult(r);  // dashboard test mode shows the device's answer
   g_lastStatus = inference::statusToString(r.status);
 
   if (r.status == InferenceStatus::ModelNotIntegrated) {
@@ -382,10 +463,11 @@ void setup() {
     net::begin(XSV_WIFI_SSID, XSV_WIFI_PASSWORD, XSV_DEVICE_ID);
     mqtt::Config mc = {XSV_MQTT_URI,     XSV_DEVICE_ID,          XSV_MQTT_PASSWORD,
                        XSV_MQTT_CA_CERT, XSV_MQTT_TOPIC_PREFIX, XSV_MQTT_RECONNECT_MS};
+    mqtt::setDownlinkHandler(onDownlink);
     mqtt::begin(mc);
     if (net::configured()) {
-      stream::begin(XSV_WEB_TOKEN, XSV_STREAM_MAX_FPS);
-      testinput::begin();
+      stream::begin(XSV_WEB_TOKEN, XSV_STREAM_MAX_FPS);  // optional local web (token needed)
+      testinput::begin();  // test frames via MQTT and/or the local web API
     }
   }
 
@@ -411,8 +493,10 @@ void loop() {
     Serial.printf("[state] input=%s - all seat states reset\n", testinput::modeName());
   }
 
-  const uint32_t interval =
-      stream::enabled() ? XSV_INFERENCE_INTERVAL_STREAMING_MS : XSV_INFERENCE_INTERVAL_MS;
+  publishRemoteFrame(now);
+  const uint32_t interval = (stream::enabled() || remoteStreamActive(now))
+                                ? XSV_INFERENCE_INTERVAL_STREAMING_MS
+                                : XSV_INFERENCE_INTERVAL_MS;
   const bool inputReady =
       testinput::mode() == testinput::InputMode::TestVideo || camera::isReady();
   if (g_seatsValid && inputReady && now - g_lastInferenceMs >= interval) {

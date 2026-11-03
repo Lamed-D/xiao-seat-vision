@@ -45,6 +45,14 @@ bool publishEvent(const SeatEvent& ev);
 // Used for periodic telemetry and snapshots; dropped while disconnected.
 bool publishRaw(const char* subtopic, const char* payload, size_t len);
 
+// Downlink (broker -> device) on the device's own connection, so it works on networks
+// where the PC cannot open connections to the board:
+//   <prefix>/<device_id>/cmd         JSON commands (QoS 1)
+//   <prefix>/<device_id>/test-frame  JPEG test frames (QoS 0)
+// The handler runs in the esp-mqtt task: keep it short and thread-safe.
+using DownlinkHandler = void (*)(const char* subtopic, const uint8_t* data, size_t len);
+void setDownlinkHandler(DownlinkHandler handler);
+
 bool enabled();
 bool connected();
 size_t pendingEvents();

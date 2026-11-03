@@ -6,6 +6,6 @@ set -eu
 SRC="$(dirname "$0")/../xiao_seat_vision"
 OUT="${TMPDIR:-/tmp}/xsv_test_logic"
 g++ -std=c++17 -Wall -Wextra -Werror -I "$SRC" \
-  "$(dirname "$0")/test_logic.cpp" "$SRC/occupancy_manager.cpp" "$SRC/seat_mapper.cpp" \
+  "$(dirname "$0")/test_logic.cpp" "$SRC/occupancy_manager.cpp" "$SRC/seat_mapper.cpp" "$SRC/chunk_assembler.cpp" \
   -o "$OUT"
 "$OUT"

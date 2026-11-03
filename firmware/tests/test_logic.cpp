@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "chunk_assembler.h"
 #include "occupancy_manager.h"
 #include "seat_mapper.h"
 
@@ -166,6 +167,33 @@ static void test_validate_seats() {
   CHECK(!validateSeats(badId, 1, &why));
 }
 
+// ---------------- ChunkAssembler (MQTT downlink reassembly) ----------------
+static void test_chunks_single_and_multi() {
+  uint8_t buf[16];
+  ChunkAssembler a(buf, sizeof(buf));
+  const uint8_t msg[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  CHECK(a.add("t/cmd", 5, msg, 10, 0, 10));  // whole message in one chunk
+  CHECK(std::strcmp(a.topic(), "t/cmd") == 0 && a.size() == 10 && a.data()[9] == 10);
+  CHECK(!a.add("t/frame", 7, msg, 4, 0, 10));  // 3 chunks, topic only on the first
+  CHECK(!a.add(nullptr, 0, msg + 4, 4, 4, 10));
+  CHECK(a.add(nullptr, 0, msg + 8, 2, 8, 10));
+  CHECK(std::strcmp(a.topic(), "t/frame") == 0 && std::memcmp(a.data(), msg, 10) == 0);
+  CHECK(a.dropped() == 0);
+}
+
+static void test_chunks_too_big_and_out_of_order() {
+  uint8_t buf[8];
+  ChunkAssembler a(buf, sizeof(buf));
+  const uint8_t msg[12] = {};
+  CHECK(!a.add("t", 1, msg, 4, 0, 12));        // larger than the buffer -> dropped
+  CHECK(!a.add(nullptr, 0, msg, 4, 4, 12));    // its continuation is ignored
+  CHECK(!a.add("t", 1, msg, 4, 0, 8));
+  CHECK(!a.add(nullptr, 0, msg, 2, 6, 8));     // gap -> dropped
+  CHECK(!a.add(nullptr, 0, msg, 2, 6, 8));
+  CHECK(a.add("t", 1, msg, 0, 0, 0));          // empty payload is a valid message
+  CHECK(a.dropped() == 2);
+}
+
 int main() {
   test_occupancy_confirms_after_three();
   test_occupancy_interrupted_streak();
@@ -179,6 +207,8 @@ int main() {
   test_mapper_ambiguous_does_not_override_clear_detection();
   test_person_moves_between_seats();
   test_validate_seats();
+  test_chunks_single_and_multi();
+  test_chunks_too_big_and_out_of_order();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

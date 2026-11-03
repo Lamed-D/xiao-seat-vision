@@ -19,7 +19,9 @@ namespace testinput {
 
 enum class InputMode : uint8_t { LiveCamera = 0, TestVideo };
 
-bool begin();  // registers handlers on stream::controlServer()
+// Allocates the frame slot; registers the HTTP handlers when the web server runs.
+// Test frames can also arrive over MQTT (submitFrame) without the web server.
+bool begin();
 InputMode mode();
 const char* modeName();
 // Incremented on every mode switch (main resets the occupancy state on change).
@@ -28,6 +30,13 @@ uint32_t modeGeneration();
 // Loop task only. If a new test frame is pending, copies it into a loop-owned
 // buffer and points *fb at it (valid until the next call). Returns false if none.
 bool takeFrame(camera_fb_t* fb);
+
+// Any task: switch the input mode (MQTT command or HTTP).
+void setMode(InputMode mode);
+
+// Any task: put a JPEG into the single pending slot (newer replaces an unprocessed one).
+// Returns nullptr on success, otherwise a short error text.
+const char* submitFrame(const uint8_t* jpeg, size_t len);
 
 // Loop task: publish the latest classification so /api/test-frame can return it.
 void reportResult(const char* status, const char* state, float confidence, uint32_t inferenceMs);

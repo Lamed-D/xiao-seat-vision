@@ -5,6 +5,8 @@
 
 #include <atomic>
 
+#include "chunk_assembler.h"
+#include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "mqtt_client.h"
 
@@ -27,6 +29,12 @@ esp_mqtt_client_handle_t s_client = nullptr;
 char s_eventsTopic[96];
 char s_rawTopic[128];
 char s_statusTopic[96];
+char s_cmdTopic[96];
+char s_testFrameTopic[96];
+size_t s_topicPrefixLen = 0;  // length of "<prefix>/<device_id>/"
+mqtt::DownlinkHandler s_downlink = nullptr;
+ChunkAssembler* s_assembler = nullptr;  // used only in the esp-mqtt task
+constexpr size_t kDownlinkMax = 64 * 1024;
 char s_offlinePayload[96];
 char s_onlinePayload[96];
 
@@ -53,6 +61,23 @@ void onMqttEvent(void*, esp_event_base_t, int32_t eventId, void* eventData) {
       Serial.printf("[mqtt] connected (session_present=%d)\n", event->session_present);
       // Retained online status; the LWT replaces it with "offline" on abnormal loss.
       esp_mqtt_client_enqueue(s_client, s_statusTopic, s_onlinePayload, 0, 1, 1, true);
+      if (s_assembler != nullptr) {  // (re)subscribe: clean session
+        esp_mqtt_client_subscribe(s_client, s_cmdTopic, 1);
+        esp_mqtt_client_subscribe(s_client, s_testFrameTopic, 0);
+      }
+      break;
+    case MQTT_EVENT_DATA:
+      if (s_assembler != nullptr && s_downlink != nullptr &&
+          s_assembler->add(event->topic, static_cast<size_t>(event->topic_len),
+                           reinterpret_cast<const uint8_t*>(event->data),
+                           static_cast<size_t>(event->data_len),
+                           static_cast<size_t>(event->current_data_offset),
+                           static_cast<size_t>(event->total_data_len))) {
+        const char* topic = s_assembler->topic();
+        if (strlen(topic) > s_topicPrefixLen) {
+          s_downlink(topic + s_topicPrefixLen, s_assembler->data(), s_assembler->size());
+        }
+      }
       break;
     case MQTT_EVENT_DISCONNECTED:
       s_connected = false;
@@ -133,6 +158,14 @@ bool begin(const Config& cfg) {
 
   snprintf(s_eventsTopic, sizeof(s_eventsTopic), "%s/%s/events", cfg.topicPrefix, cfg.deviceId);
   snprintf(s_statusTopic, sizeof(s_statusTopic), "%s/%s/status", cfg.topicPrefix, cfg.deviceId);
+  snprintf(s_cmdTopic, sizeof(s_cmdTopic), "%s/%s/cmd", cfg.topicPrefix, cfg.deviceId);
+  snprintf(s_testFrameTopic, sizeof(s_testFrameTopic), "%s/%s/test-frame", cfg.topicPrefix, cfg.deviceId);
+  s_topicPrefixLen = strlen(cfg.topicPrefix) + 1 + strlen(cfg.deviceId) + 1;
+  // Reassembly buffer for downlink messages (JPEG test frames) in PSRAM.
+  static uint8_t* buf = static_cast<uint8_t*>(heap_caps_malloc(kDownlinkMax, MALLOC_CAP_SPIRAM));
+  static ChunkAssembler assembler(buf, buf ? kDownlinkMax : 0);
+  s_assembler = buf ? &assembler : nullptr;
+  if (!buf) Serial.println("[mqtt] downlink disabled (no PSRAM buffer)");
   snprintf(s_onlinePayload, sizeof(s_onlinePayload), "{\"device_id\":\"%s\",\"status\":\"online\"}",
            cfg.deviceId);
   snprintf(s_offlinePayload, sizeof(s_offlinePayload),
@@ -239,6 +272,8 @@ bool publishEvent(const SeatEvent& ev) {
   ++s_count;
   return true;
 }
+
+void setDownlinkHandler(DownlinkHandler handler) { s_downlink = handler; }
 
 bool publishRaw(const char* subtopic, const char* payload, size_t len) {
   if (!s_enabled || !s_connected.load()) return false;
