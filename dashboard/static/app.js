@@ -24,6 +24,14 @@
     },
   };
   let settings = { ...DEFAULTS, ...store.get("xsv-settings", {}) };
+  // One-off URL overrides (not saved): ?dev=1 developer view, ?test=1 test data,
+  // ?privacy=1 blurs every camera photo (screen sharing / documentation screenshots).
+  const qs = new URLSearchParams(typeof location !== "undefined" ? location.search : "");
+  if (qs.get("dev") === "1") settings = { ...settings, devMode: true };
+  if (qs.get("test") === "1") settings = { ...settings, testData: true };
+  if (qs.get("privacy") === "1" && typeof document !== "undefined" && document.body) {
+    document.body.classList.add("privacy");
+  }
   let camOn = false;
   let devPoll = null;
   let lastFeed = null;
@@ -404,14 +412,16 @@
   async function refreshDevStatus() {
     try {
       const s = await devCall("GET", "/api/dev/status");
-      const d = s.device || {};
-      if (!s.device_configured) {
-        $("dev-status").textContent = "보드 미설정 (.env의 ESP32_URL / ESP32_WEB_TOKEN)";
-      } else if (d.error) {
-        $("dev-status").textContent = `보드 응답 없음 (${d.error})`;
+      // Device control goes through the MQTT broker (see dashboard/app/dev.py).
+      if (!s.mqtt_configured) {
+        $("dev-status").textContent = "MQTT 미설정 (.env의 DASHBOARD_MQTT_PASSWORD)";
+      } else if (!s.mqtt_connected) {
+        $("dev-status").textContent = "브로커 연결 안 됨";
       } else {
-        $("dev-status").textContent = `보드 연결됨 · 카메라 영상 ${d.streaming ? "ON" : "OFF"}`;
-        if (d.streaming === false && camOn) setCamera(false, true); // auto-off on the device
+        const r = s.last_result;
+        $("dev-status").textContent =
+          `보드 ${s.device_status === "online" ? "연결됨" : "연결 안 됨"} · 카메라 영상 ${s.preview_active ? "ON" : "OFF"}` +
+          (r ? ` · 마지막 테스트 결과: 사람 ${r.persons}명 (${r.inference_ms} ms)` : "");
       }
       $("tv-status").textContent = feederText(s);
     } catch (e) {

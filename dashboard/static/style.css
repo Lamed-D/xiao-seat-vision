@@ -128,3 +128,8 @@ select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); 
 .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .btn:disabled { opacity: .5; cursor: wait; }
 #ti-result { white-space: pre-wrap; background: var(--bg); padding: 6px; border-radius: 6px; margin: 0; }
+
+/* ---- privacy mode (?privacy=1): blur camera photos, keep boxes/labels readable ---- */
+body.privacy .snapshot-wrap img, body.privacy .event-media img, body.privacy .person-thumb,
+body.privacy .event-person, body.privacy #cam-stream { filter: blur(9px) saturate(.6); }
+body.privacy .snapshot-wrap, body.privacy .event-media, body.privacy .people-list li { overflow: hidden; }

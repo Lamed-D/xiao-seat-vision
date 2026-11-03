@@ -81,7 +81,7 @@ test("app.js runs against a minimal DOM and renders counts (smoke test)", async 
   const makeEl = (id) => ({
     id, hidden: false, textContent: "", style: {}, src: "", returnValue: "",
     elements: {}, children: [], className: "", value: "", dataset: {},
-    classList: { toggle() {} },
+    classList: { toggle() {}, add() {} },
     setAttribute() {}, removeAttribute() {}, append(...c) { this.children.push(...c); },
     replaceChildren() { this.children = []; }, addEventListener() {}, showModal() {},
   });
@@ -98,8 +98,8 @@ test("app.js runs against a minimal DOM and renders counts (smoke test)", async 
     seat_label: "Seat 1", created_at: "2026-11-03T09:59:00Z", snapshot: { url: "https://x/a.jpg" },
     person_crop: { x: 0.1, y: 0.2, width: 0.3, height: 0.6 } }] };
   const ctx = {
-    window: {}, document, console, URL, setInterval() {}, clearInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} },
-    location: { origin: "http://127.0.0.1:8080" },
+    window: {}, document, console, URL, URLSearchParams, setInterval() {}, clearInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+    location: { origin: "http://127.0.0.1:8080", search: "", hash: "" },
     fetch: async (u) => ({ ok: true, json: async () => (String(u).includes("events") ? feed : summary) }),
   };
   ctx.window = ctx;
