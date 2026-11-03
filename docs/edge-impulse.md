@@ -31,7 +31,8 @@ Image classification (`empty`/`occupied`) is still supported but only tracks **o
    #define XSV_EI_MODEL_HEADER "xiao-seat-vision_inferencing.h"
    ```
 4. Compile/upload. Boot log shows `type=fomo`, input size, labels and the model's field of view.
-5. CI: commit the zip to `firmware/ei-model/` → the `firmware` job installs it and compiles the model build too.
+5. The zip and all camera photos/datasets/videos stay local (`.gitignore`). The CI model build only runs
+   if someone deliberately force-adds a zip; by default CI builds the model-less firmware.
 
 ## Automated pipeline (`scripts/edge_impulse.py`, needs an **Admin** API key in `.env`)
 ```bash

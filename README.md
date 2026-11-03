@@ -469,7 +469,7 @@ static const SeatRoi kSeats[] = {
    #define XSV_EI_MODEL_HEADER "xiao-seat-vision_inferencing.h"   // 주석(//) 제거
    ```
 7. Upload → 시리얼에서 `[infer] Edge Impulse model: ... type=fomo`, `[infer] 1 person(s) inference=..ms`, `[state] seat_01 -> occupied` 확인
-8. (선택) CI에서도 모델 포함 빌드를 하려면 zip을 `firmware/ei-model/` 에 넣어 커밋
+8. 모델 zip(`firmware/ei-model/`)과 카메라 사진·데이터셋·영상은 **GitHub에 올리지 않습니다**(`.gitignore`로 차단). 모델 포함 빌드는 로컬에서 확인합니다.
 
 상세·호환성 주의사항: [docs/edge-impulse.md](docs/edge-impulse.md)
 

@@ -51,3 +51,19 @@ Thumbs.db
 # ---- datasets (downloaded / collected images) ----
 datasets/
 snapshots/
+
+# ---- people / camera data must never reach GitHub ----
+# Camera photos, snapshots, datasets, test videos and anything derived from them stay local.
+snapshots/
+**/snapshots/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.mp4
+*.avi
+*.mov
+*.mkv
+# Exported Edge Impulse models (trained on local data); add explicitly only if you decide to.
+firmware/ei-model/

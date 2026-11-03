@@ -15,7 +15,8 @@ Triggers: `push`, `pull_request`, `workflow_dispatch`. No Supabase/MQTT secrets 
 
 ## Honest limits
 - A green firmware job means **it compiles** — not that the camera, PSRAM, AI or MQTT work on the board.
-- Without `firmware/ei-model/*.zip` no AI code path is compiled (`model_not_integrated` build only).
+- Model zips, camera photos, datasets and videos are git-ignored (no people data on GitHub), so CI
+  normally compiles only the model-less firmware (`model_not_integrated`). The model build is verified locally.
 - Supabase is tested with an in-memory fake and a stubbed Postgres, not a real project; Storage upload
   and signed URLs are only exercised after deployment.
 - Hardware tests: [hardware-test.md](hardware-test.md).
