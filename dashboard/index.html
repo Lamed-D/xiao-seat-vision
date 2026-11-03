@@ -91,6 +91,14 @@
     </form>
   </dialog>
 
+  <script>
+    // Make script failures visible instead of leaving the placeholders ("–") on screen.
+    window.addEventListener("error", function (e) {
+      var el = document.getElementById("error");
+      if (el) el.textContent = "화면 스크립트 오류: " + (e.message || e) + " (Ctrl+F5로 새로고침)";
+    });
+  </script>
+  <script src="viewmodel.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

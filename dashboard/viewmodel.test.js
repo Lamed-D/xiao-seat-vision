@@ -66,3 +66,44 @@ test("people: labels per person, seat text, scores only in developer mode", () =
   const on = buildViewModel(summary, debug, true);
   assert.deepEqual(on.dev.personConfidence, [0.9]);
 });
+
+test("index.html loads config.js, viewmodel.js, app.js in this order (app.js depends on both)", () => {
+  const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "index.html"), "utf8");
+  const order = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ["config.js", "viewmodel.js", "app.js"]);
+});
+
+test("app.js runs against a minimal DOM and renders counts (smoke test)", async () => {
+  const vm = require("node:vm");
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const elements = {};
+  const makeEl = (id) => ({
+    id, hidden: false, textContent: "", style: {}, src: "", returnValue: "",
+    elements: {}, children: [],
+    setAttribute() {}, removeAttribute() {}, append(...c) { this.children.push(...c); },
+    replaceChildren() { this.children = []; }, addEventListener() {}, showModal() {},
+  });
+  const document = {
+    getElementById: (id) => (elements[id] ??= makeEl(id)),
+    createElement: (t) => makeEl(t),
+    createElementNS: (_ns, t) => makeEl(t),
+    createTextNode: (t) => ({ text: t }),
+  };
+  const summary = { generated_at: "2026-11-03T10:00:00Z", counts: { total: 3, occupied: 1, empty: 2, unknown: 0 },
+    seats: [], snapshot: null, people: [] };
+  const ctx = {
+    window: {}, document, console, URL, setInterval() {}, localStorage: { getItem: () => null, setItem() {} },
+    location: { origin: "http://127.0.0.1:8080" },
+    fetch: async () => ({ ok: true, json: async () => summary }),
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext('window.XSV_CONFIG = { apiUrl: "", proxy: true, proxyAdmin: true };', ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "viewmodel.js"), "utf8"), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(elements["c-total"].textContent, 3);
+  assert.equal(elements["c-occupied"].textContent, 1);
+  assert.equal(elements["error"].textContent, "");
+});
