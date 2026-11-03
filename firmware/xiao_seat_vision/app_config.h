@@ -19,7 +19,7 @@
 #endif
 
 #ifndef XSV_MIN_CONFIDENCE
-#define XSV_MIN_CONFIDENCE 0.60f
+#define XSV_MIN_CONFIDENCE 0.30f
 #endif
 
 #ifndef XSV_MQTT_RECONNECT_MS
@@ -46,7 +46,14 @@
 // ---- Multi-seat (FOMO) ----
 // Person detections below this confidence are ignored by the seat mapper.
 #ifndef XSV_PERSON_MIN_CONFIDENCE
-#define XSV_PERSON_MIN_CONFIDENCE 0.50f
+#define XSV_PERSON_MIN_CONFIDENCE 0.30f
+#endif
+
+// FOMO score threshold applied to the Edge Impulse model at startup (the exported
+// model defaults to 0.5). Lower = catches more people (e.g. close-up / seated upper
+// bodies) at the cost of more false positives. Tune with the on-device eval script.
+#ifndef XSV_EI_THRESHOLD
+#define XSV_EI_THRESHOLD 0.30f
 #endif
 
 // No successful inference for this long -> every seat is forced to UNKNOWN.

@@ -347,8 +347,13 @@ void handleResult(const camera_fb_t* fb, const InferenceResult& r, bool isTest) 
   g_lastValidResultMs = millis();
   ++g_okCycles;
   if (r.objectDetection) {
-    Serial.printf("[infer] %s%u person(s) inference=%lums preprocess=%lums\n", isTest ? "[test] " : "",
-                  r.detectionCount, static_cast<unsigned long>(r.inferenceMs),
+    float best = 0.0f;
+    for (uint8_t i = 0; i < r.detectionCount; ++i) {
+      if (r.detections[i].confidence > best) best = r.detections[i].confidence;
+    }
+    Serial.printf("[infer] %s%u person(s) max=%.2f inference=%lums preprocess=%lums\n",
+                  isTest ? "[test] " : "", r.detectionCount, static_cast<double>(best),
+                  static_cast<unsigned long>(r.inferenceMs),
                   static_cast<unsigned long>(r.preprocessMs));
   } else {
     Serial.printf("[infer] %s%s conf=%.3f inference=%lums preprocess=%lums\n", isTest ? "[test] " : "",

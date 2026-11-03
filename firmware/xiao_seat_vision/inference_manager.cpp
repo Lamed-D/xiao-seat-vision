@@ -93,6 +93,15 @@ bool begin() {
 #endif
   s_info.inputWidth = EI_CLASSIFIER_INPUT_WIDTH;
   s_info.inputHeight = EI_CLASSIFIER_INPUT_HEIGHT;
+
+#if EI_CLASSIFIER_OBJECT_DETECTION == 1
+  for (size_t i = 0; i < ei_default_impulse.impulse->postprocessing_blocks_size; ++i) {
+    const EI_IMPULSE_ERROR te = set_threshold_postprocessing(
+        &ei_default_impulse.impulse->postprocessing_blocks[i], "min_score", XSV_EI_THRESHOLD);
+    Serial.printf("[infer] detection threshold %.2f (%s)\n", static_cast<double>(XSV_EI_THRESHOLD),
+                  te == EI_IMPULSE_OK ? "ok" : "not applied");
+  }
+#endif
   cropView(320, 240, EI_CLASSIFIER_INPUT_WIDTH, EI_CLASSIFIER_INPUT_HEIGHT, &s_info.viewX,
            &s_info.viewW, &s_info.viewY, &s_info.viewH);
 
