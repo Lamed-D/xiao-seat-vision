@@ -67,3 +67,7 @@ snapshots/
 *.mkv
 # Exported Edge Impulse models (trained on local data); add explicitly only if you decide to.
 firmware/ei-model/
+# Exception: documentation screenshots. Camera photos in them must be blurred
+# (dashboard ?privacy=1) — review every image before committing.
+!docs/images/
+!docs/images/*.png

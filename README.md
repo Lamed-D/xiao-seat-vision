@@ -26,9 +26,58 @@
 > "CI 통과 = 컴파일 성공"이며, 보드에서 실제로 동작함을 뜻하지 않습니다.
 > 무엇을 언제 어떻게 검증했는지는 [docs/test-results.md](docs/test-results.md)에 기록합니다.
 
+## 화면 미리보기
+
+> 아래 스크린샷의 카메라 사진은 개인정보 보호를 위해 **흐림 처리**했습니다(대시보드 `?privacy=1` 화면 공유 모드).
+> 탐지 박스·라벨·숫자는 실제 화면 그대로입니다. 실제 카메라 사진·사람 데이터는 GitHub에 올리지 않습니다.
+
+**① 전체 현황** — 좌석 수, 실시간 사진 위 AI 탐지 박스, 좌석 상태, 최근 착석
+
+![대시보드 전체 현황](docs/images/dashboard-overview.png)
+
+**② 이벤트 로그** — 안전모 탐지 대시보드처럼, 사람이 앉을 때마다 찍힌 사진 카드(박스·좌석·시각, 좌석 필터, 클릭 시 확대)
+
+![대시보드 이벤트 로그](docs/images/dashboard-event-log.png)
+
+**③ 개발자 모드 + 테스트 모드** (기본 OFF) — 좌석 ROI 경계선, 신뢰도·추론 시간·메모리·MQTT 상태,
+카메라 실시간 영상 ON/OFF, 테스트 영상 재생, 테스트 이미지 전송
+
+![개발자 모드와 테스트 모드](docs/images/dashboard-developer-test-mode.png)
+
+**④ 테스트 데이터 보기** — 테스트 이미지·영상으로 보드가 판단해 Supabase에 저장된 기록(`is_test=true`, 실제 기록과 분리)
+
+![테스트 데이터 이벤트 로그](docs/images/dashboard-test-data.png)
+
+**⑤ 대시보드 서버 API** (FastAPI 자동 문서, http://127.0.0.1:8080/docs)
+
+![FastAPI API 문서](docs/images/dashboard-api-docs.png)
+
+### 실행 중인 서비스
+
+| 서비스 | 어디서 | 주소 / 포트 | 역할 |
+|---|---|---|---|
+| **XIAO ESP32S3 Sense** | 보드 | Wi-Fi, MQTT 클라이언트 | 촬영 → AI(FOMO, 약 122 ms) → 좌석 판단 → MQTT 발행, 명령 수신 |
+| **mosquitto** | Docker | `8883` (TLS, LAN) | MQTT 브로커: 계정·장치별 권한(ACL), 메시지 보관 |
+| **mqtt-bridge** | Docker | (포트 없음) | MQTT 메시지 검증 → Supabase Edge Function 전달, 실패 시 재시도 |
+| **dashboard** | Docker | `127.0.0.1:8080` | FastAPI + uvicorn: 대시보드 화면, 토큰 대리 전송, 사람 사진 자르기, 테스트 모드 |
+| **video-feeder** (선택) | Docker | `127.0.0.1:8090` | MP4 영상을 카메라 대신 보드에 넣는 테스트 도구 |
+| **Supabase** | 클라우드 | `https://<ref>.supabase.co` | Edge Functions 4개 + PostgreSQL + 사진 저장소 |
+
+실제 상태 예 (`docker compose --profile test-video ps`, 2026-11-03):
+```text
+SERVICE        STATUS                        PORTS
+dashboard      Up About a minute (healthy)   127.0.0.1:8080->8000/tcp
+mosquitto      Up 38 minutes (healthy)       0.0.0.0:8883->8883/tcp
+mqtt-bridge    Up 4 hours (healthy)
+video-feeder   Up 24 minutes (healthy)       127.0.0.1:8090->8090/tcp
+```
+
+---
+
 ---
 
 ## 목차
+- [화면 미리보기](#화면-미리보기)
 - [0. 전체 구조 한눈에 보기](#0-전체-구조-한눈에-보기)
 - [1. 준비물](#1-준비물)
 - [2. 프로그램 설치 (PC)](#2-프로그램-설치-pc)
@@ -498,7 +547,20 @@ static const SeatRoi kSeats[] = {
 **개발자 모드** (⚙ 설정 → 개발자 모드 체크, 기본 OFF. 이 PC의 Docker 대시보드는 관리자 토큰도 자동 사용)
 - 좌석별 AI 신뢰도·추론 시간, ROI 경계선과 감지 중심점, FPS, Heap/PSRAM 여유, MQTT 연결·마지막 수신 시각, 모델 이름·버전, 최근 이벤트, 원시 JSON
 - 개발자 모드는 **화면 표시 설정**입니다. 상세 데이터는 서버가 관리자 토큰에만 제공합니다.
-- "테스트 영상 데이터 보기"를 켜면 테스트 이벤트(`is_test=true`)만 따로 봅니다.
+- **테스트 모드 패널**(개발자 모드에서만 표시):
+  - **카메라 실시간 영상** 켜기/끄기 (보드가 MQTT로 사진을 보냄, 시청을 멈추면 자동 OFF)
+  - **테스트 영상** ▶ 재생 / ⏸ 일시정지 / ⏹ 정지
+  - **테스트 이미지 전송**: 사진 파일 선택 → 보드가 실제로 추론 → MQTT → Supabase → 이벤트 로그(테스트 데이터)
+  - **테스트 데이터 보기** ON/OFF: 테스트 기록(`is_test=true`)만 따로 봄
+- 테스트 모드의 모든 명령은 **MQTT 브로커를 거쳐** 보드로 갑니다(보드가 먼저 맺은 연결 사용). 그래서 PC가 보드에 직접 접속할 수 없는 Wi-Fi(기기 간 통신 제한)에서도 동작합니다.
+
+**주소로 바로 열기** (저장되지 않는 일회성 옵션)
+| 주소 | 화면 |
+|---|---|
+| `http://127.0.0.1:8080/#events` | 이벤트 로그 탭 |
+| `http://127.0.0.1:8080/?dev=1` | 개발자 모드 + 테스트 모드 |
+| `http://127.0.0.1:8080/?test=1#events` | 테스트 데이터 이벤트 로그 |
+| `http://127.0.0.1:8080/?privacy=1` | 카메라 사진 흐림 처리 (화면 공유·문서용 캡처) |
 
 장치가 꺼지거나(LWT) 3분 이상 소식이 없으면 그 장치의 좌석은 모두 **확인 불가**로 표시됩니다.
 설정은 이 브라우저에만 저장됩니다. 상세: [docs/dashboard.md](docs/dashboard.md)
@@ -508,9 +570,11 @@ static const SeatRoi kSeats[] = {
 ## 12. 실시간 스트리밍 (선택)
 
 AI 판단이 최우선이며, 스트리밍은 화면 확인용 보조 기능입니다. **기본 OFF**.
-- 보드 웹페이지: `http://<보드IP>/?token=<XSV_WEB_TOKEN>` → **Stream ON / OFF** 버튼
-- 또는 대시보드 ⚙ 설정에 보드 주소(`http://192.168.0.42`)와 웹 토큰 입력 → "스트리밍 켜기" 버튼 (개발자 모드와 무관)
-- 시리얼 모니터에서 `v` 입력으로도 토글
+- **권장: 대시보드 → 개발자 모드 → 테스트 모드 → "카메라 켜기"** (MQTT 경유, 토큰·보드 주소 입력 불필요)
+  - 보드가 2 fps로 사진을 `xiao-seat-vision/<장치>/stream`에 보내고, 대시보드가 영상으로 이어 보여줍니다.
+  - 창을 닫거나 끄면 보드 전송도 멈춥니다(60초마다 갱신, 최대 2분 자동 종료).
+- 보조: 보드 웹페이지 `http://<보드IP>/?token=<XSV_WEB_TOKEN>` (PC→보드 직접 접속이 되는 네트워크에서만)
+- 시리얼 모니터에서 `v` 입력으로도 보드 웹 스트림 토글
 
 동작 방식: QVGA(320×240), 최대 3 FPS, 시청자 1명. 스트리밍 중에는 AI 추론 주기를 1초 → 2초로 늦춰 AI·MQTT를 우선합니다.
 OFF를 누르면 보드에서 실제로 프레임 복사·전송이 멈춥니다. 시청자가 60초 동안 없거나 메모리 부족/카메라 오류가 나면 자동 OFF됩니다.
@@ -534,8 +598,10 @@ curl http://127.0.0.1:8090/status              # 상태
 
 | 모드 (`video_feeder/.env`의 `TARGET`) | 필요한 것 | 검증되는 것 |
 |---|---|---|
-| `esp32` | 실제 보드 + 모델 + `ESP32_URL`, `ESP32_WEB_TOKEN` | 보드 안 AI 추론 ~ DB 저장 전체 |
+| `esp32` | 실제 보드 + 모델 (프레임은 **MQTT로** 보드에 전달, `.env`의 `FEEDER_MQTT_PASSWORD`) | 보드 안 AI 추론 ~ DB 저장 전체 |
 | `mqtt` | 보드 없음. `sh mqtt/scripts/add-user.sh xiao-test-01` 로 테스트 장치 계정 + 라벨 CSV | MQTT → 브리지 → Supabase → 대시보드 (AI는 검증 안 됨) |
+
+대시보드 개발자 모드의 **테스트 영상 ▶ 재생** 버튼으로도 같은 영상을 재생할 수 있습니다.
 
 `mqtt` 모드의 좌석 상태는 AI가 아니라 **사람이 만든 정답 라벨**(`test-videos/<영상이름>.labels.csv`)에서 나옵니다. 상세: [docs/test-video.md](docs/test-video.md)
 
