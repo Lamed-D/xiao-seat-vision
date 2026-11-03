@@ -39,6 +39,9 @@ bool begin(const char* ssid, const char* password, const char* hostname) {
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(hostname);
   WiFi.setAutoReconnect(false);  // reconnect is driven by loop() with backoff
+  // USB powered: disable modem sleep. With power save on, the local web API (dashboard
+  // test mode, preview stream) answered after 1-8 s instead of < 1 s.
+  WiFi.setSleep(false);
   startAttempt();
   return true;
 }
