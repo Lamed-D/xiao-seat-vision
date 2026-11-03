@@ -60,6 +60,10 @@ bool begin() {
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.fb_count = 2;
     config.grab_mode = CAMERA_GRAB_LATEST;
+    // The driver sizes JPEG buffers from the resolution, not the content. A busy
+    // scene at high quality can exceed it ("cam_hal: FB-OVF", frame dropped).
+    // 15 (0 = best .. 63 = smallest) leaves headroom at QVGA; plenty for a 96-160 px model.
+    config.jpeg_quality = 15;
   } else {
     Serial.println("[camera] WARNING: PSRAM not found - falling back to 1 small DRAM buffer");
     Serial.println("[camera]          Arduino IDE: Tools > PSRAM > OPI PSRAM");
@@ -67,6 +71,7 @@ bool begin() {
     config.fb_location = CAMERA_FB_IN_DRAM;
     config.fb_count = 1;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    config.jpeg_quality = 30;  // tiny DRAM buffer: compress harder to avoid FB-OVF
   }
 
   esp_err_t err = esp_camera_init(&config);
