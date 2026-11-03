@@ -32,6 +32,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import dev
 from .people import build_people, crop_jpeg
 
 log = logging.getLogger("dashboard")
@@ -44,6 +45,9 @@ class Settings:
     viewer_token: str = ""
     admin_token: str = ""
     timeout_s: float = 15.0
+    esp32_url: str = ""
+    esp32_token: str = ""
+    feeder_url: str = ""
 
     @staticmethod
     def from_env() -> "Settings":
@@ -52,6 +56,9 @@ class Settings:
             viewer_token=os.environ.get("DASHBOARD_VIEWER_TOKEN", "").strip(),
             admin_token=os.environ.get("DASHBOARD_ADMIN_TOKEN", "").strip(),
             timeout_s=float(os.environ.get("UPSTREAM_TIMEOUT_S", "15")),
+            esp32_url=os.environ.get("ESP32_URL", "").strip(),
+            esp32_token=os.environ.get("ESP32_WEB_TOKEN", "").strip(),
+            feeder_url=os.environ.get("FEEDER_URL", "").strip(),
         )
 
     @property
@@ -67,7 +74,9 @@ class Settings:
 class SnapshotCache:
     """Remembers the latest snapshots' signed URL + crops so thumbnails can be served."""
 
-    def __init__(self, size: int = 16) -> None:
+    # Must hold at least one entry per event card (feed limit 100) plus the live view;
+    # entries are small until a thumbnail is requested.
+    def __init__(self, size: int = 256) -> None:
         self._items: OrderedDict[str, dict] = OrderedDict()
         self._size = size
 
@@ -127,7 +136,9 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
 
     @app.get("/config.js")
     async def config_js() -> Response:
-        cfg = {"apiUrl": settings.api_url, "proxy": settings.proxy, "proxyAdmin": bool(settings.admin_token)}
+        cfg = {"apiUrl": settings.api_url, "proxy": settings.proxy, "proxyAdmin": bool(settings.admin_token),
+               "deviceControl": bool(settings.esp32_url and settings.esp32_token),
+               "testVideo": bool(settings.feeder_url)}
         return Response(f"window.XSV_CONFIG = {json.dumps(cfg)};\n", media_type="application/javascript",
                         headers={"cache-control": "no-store"})
 
@@ -183,7 +194,8 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         summary["people"] = people
 
     def add_event_images(feed: dict) -> None:
-        for e in feed.get("events", []):
+        # oldest first, so the newest events are the most recently used cache entries
+        for e in reversed(feed.get("events", [])):
             snap, crop = e.get("snapshot"), e.get("person_crop")
             if not snap:
                 continue
@@ -212,6 +224,9 @@ def create_app(settings: Settings | None = None, transport: httpx.AsyncBaseTrans
         # Content for a given key never changes (key = snapshot identity).
         return Response(thumbs[index], media_type="image/jpeg",
                         headers={"cache-control": "private, max-age=600"})
+
+    dev.register(app, settings.esp32_url, settings.esp32_token, settings.feeder_url,
+                 frame_gap_s=float(os.environ.get("TEST_FRAME_GAP_S", dev.FRAME_GAP_S)))
 
     @app.middleware("http")
     async def no_cache_static(request: Request, call_next):

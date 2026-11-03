@@ -148,3 +148,121 @@ def test_upstream_status_passthrough(view):
 
     with client(upstream=Fail())[0] as c:
         assert c.get(f"/api/dashboard?view={view}").status_code == 401
+
+
+def test_all_event_images_stay_available_for_a_full_feed():
+    """Regression: a 16-entry cache evicted the newest of 30 event cards (404 thumbnails)."""
+    events = [{"event_id": f"e{i}", "device_id": "xiao-01", "seat_id": "seat_01", "seat_label": "Seat 1",
+               "created_at": f"2026-11-03T10:{i:02d}:01Z",
+               "snapshot": {"url": SNAP_URL, "width": 320, "height": 240, "created_at": f"2026-11-03T10:{i:02d}:00Z"},
+               "person_crop": {"x": 0.05, "y": 0.2, "width": 0.3, "height": 0.6}} for i in range(40)]
+
+    class Many(Upstream):
+        def __call__(self, request):
+            if request.url.params.get("view") == "events":
+                return httpx.Response(200, json={"since": "s", "sit_downs": {"total": 40, "per_seat": {}},
+                                                 "events": events})
+            return super().__call__(request)
+
+    with client(upstream=Many())[0] as c:
+        feed = c.get("/api/dashboard?view=events").json()
+        urls = [e["person_image_url"] for e in feed["events"]]
+        assert len(set(urls)) == 40
+        assert all(c.get(u).status_code == 200 for u in urls)
+
+
+# ---------------------------------------------------------------- 테스트 모드 (developer)
+ESP32 = "http://172.16.0.50"
+ESP_TOKEN = "esp-web-token-123"
+FEEDER = "http://video-feeder:8090"
+
+
+class Device:
+    """Fake ESP32 web API + video feeder."""
+
+    def __init__(self):
+        self.calls = []
+        self.mode = "live_camera"
+        self.streaming = False
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        self.calls.append((request.method, request.url.path, dict(request.url.params)))
+        if url.startswith(FEEDER):
+            return httpx.Response(200, json={"state": "playing" if request.url.path == "/play" else "stopped",
+                                             "video": "demo.mp4", "frames_sent": 3, "video_time_s": 1.5})
+        if request.url.params.get("token") != ESP_TOKEN:
+            return httpx.Response(401, json={"error": "token"})
+        if request.url.port == 81:
+            return httpx.Response(200, content=b"--xsvframe\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg(),
+                                  headers={"content-type": "multipart/x-mixed-replace;boundary=xsvframe"})
+        if request.url.path == "/api/status":
+            return httpx.Response(200, json={"streaming": self.streaming, "client": False})
+        if request.url.path == "/api/stream":
+            self.streaming = request.url.params.get("enable") == "1"
+            return httpx.Response(200, json={"streaming": self.streaming})
+        if request.url.path == "/api/mode":
+            self.mode = request.url.params.get("mode")
+            return httpx.Response(200, json={"mode": self.mode})
+        if request.url.path == "/api/test-frame":
+            assert request.content[:2] == b"\xff\xd8"
+            return httpx.Response(202, json={"accepted": True, "last_result": {
+                "status": "ok", "state": "unknown", "confidence": 0, "inference_ms": 123}})
+        return httpx.Response(404, json={})
+
+
+def dev_client(device, monkeypatch):
+    monkeypatch.setenv("TEST_FRAME_GAP_S", "0")
+    app = create_app(Settings(API, VIEWER, ADMIN, esp32_url=ESP32, esp32_token=ESP_TOKEN, feeder_url=FEEDER),
+                     httpx.MockTransport(device))
+    return TestClient(app)
+
+
+def test_dev_config_flags_and_status(monkeypatch):
+    d = Device()
+    with dev_client(d, monkeypatch) as c:
+        cfg = c.get("/config.js").text
+        assert '"deviceControl": true' in cfg and '"testVideo": true' in cfg and ESP_TOKEN not in cfg
+        s = c.get("/api/dev/status").json()
+        assert s["device"]["streaming"] is False and s["feeder"]["video"] == "demo.mp4"
+        assert ESP_TOKEN not in json.dumps(s)
+
+
+def test_dev_camera_on_off_and_stream_proxy(monkeypatch):
+    d = Device()
+    with dev_client(d, monkeypatch) as c:
+        assert c.post("/api/dev/stream?enable=1").json() == {"streaming": True}
+        r = c.get("/api/dev/stream.mjpg")
+        assert r.status_code == 200 and r.headers["content-type"].startswith("multipart/x-mixed-replace")
+        assert b"\xff\xd8" in r.content
+        assert c.post("/api/dev/stream?enable=0").json() == {"streaming": False}
+
+
+def test_dev_test_video_controls(monkeypatch):
+    d = Device()
+    with dev_client(d, monkeypatch) as c:
+        assert c.post("/api/dev/test-video/play").json()["state"] == "playing"
+        assert c.post("/api/dev/test-video/stop").status_code == 200
+        assert c.post("/api/dev/test-video/rewind").status_code == 404
+
+
+def test_dev_test_image_runs_device_pipeline_and_restores_live_mode(monkeypatch):
+    d = Device()
+    buf = io.BytesIO()
+    Image.new("RGB", (1000, 600), (10, 200, 30)).save(buf, "PNG")  # any format/size
+    with dev_client(d, monkeypatch) as c:
+        r = c.post("/api/dev/test-image", content=buf.getvalue(), headers={"content-type": "image/png"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["frames_sent"] == 5 and len(body["results"]) == 4
+        assert c.post("/api/dev/test-image", content=b"not an image").status_code == 422
+    paths = [p for _m, p, _q in d.calls]
+    assert paths[0] == "/api/mode" and paths.count("/api/test-frame") == 5
+    assert d.mode == "live_camera"  # always switched back
+
+
+def test_dev_controls_not_configured(monkeypatch):
+    with client()[0] as c:  # no ESP32 / feeder settings
+        assert c.post("/api/dev/stream?enable=1").status_code == 503
+        assert c.post("/api/dev/test-video/play").status_code == 503
+        assert '"deviceControl": false' in c.get("/config.js").text
