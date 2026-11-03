@@ -51,5 +51,8 @@ inference, multi-seat detection, long-run stability → [hardware-test.md](hardw
 | DB migrations | `sh supabase/tests/run_migration_tests.sh` (PostgreSQL 15) | ✅ all checks passed |
 | Docker integration | `bash tests/integration/run.sh` | ✅ 14/14 (TLS/SAN, auth, ACL, bridge, duplicates, persistence, dashboard health) |
 | Commit messages | `scripts/check_commits.py` | ✅ all commits conform |
-| Supabase deployment | — | ⏳ not done (no project credentials here) |
+| Supabase deployment | `db push --remote`, `secrets set`, `functions deploy` | ✅ 001+002 applied (PostgreSQL 17), 4 functions ACTIVE (`verify_jwt=false`); 401 without token, 405 on GET, 403 debug with viewer token |
+| End to end (device → DB) | bridge log + `dashboard-api` | ✅ `xiao-01` status `online` and 30 s telemetry stored; summary: 3 seats `unknown` (no model) |
+| Dashboard token proxy | `curl 127.0.0.1:8080/api/dashboard?view=summary|debug` | ✅ 200 / 200 without browser token; tokens absent from `config.js`; without tokens the proxy is disabled (503) |
+| Edge Impulse upload/training | `scripts/edge_impulse.py upload` | ⏳ blocked: API key role `ingestion_deployment`, needs an **Admin** key; nothing uploaded yet |
 | GitHub Actions run | `feat/initial-mvp` @ 5104621 | ✅ all jobs green ([run 41572132643](https://github.com/Lamed-D/xiao-seat-vision/actions/runs/41572132643)); Docker integration first failed on Linux only, reproduced with docker-in-docker and fixed |

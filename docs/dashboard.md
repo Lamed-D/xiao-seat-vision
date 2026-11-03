@@ -2,6 +2,14 @@
 
 Static page (`dashboard/`, nginx container, http://127.0.0.1:8080). No build step.
 
+## Token proxy (local, no login)
+If `.env` contains `DASHBOARD_VIEWER_TOKEN` (and optionally `DASHBOARD_ADMIN_TOKEN`), the container serves
+`/api/dashboard` as a reverse proxy to `dashboard-api` and adds the token server-side
+(`view=summary` → viewer, `view=debug|layout` → admin). The browser never receives the tokens.
+Because this grants token-less access, the container is published on **127.0.0.1 only** — keep it that way.
+Without these variables the proxy returns 503 and users must enter tokens in the settings.
+A token typed into the settings always takes precedence (direct call to Supabase).
+
 ## Normal view (developer mode OFF — default)
 - Counts: total / occupied / empty (/ unknown if any)
 - Latest snapshot with one badge per seat (green = empty, orange = occupied, grey = unknown)
