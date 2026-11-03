@@ -558,7 +558,7 @@ docker run --rm -v "$PWD/firmware:/src/firmware:ro" -w /src gcc:14 sh firmware/t
 # 브리지 / 비디오 피더 / 대시보드
 pip install -r bridge/requirements-dev.txt && python -m pytest -q bridge/tests
 pip install -r video_feeder/requirements-dev.txt && python -m pytest -q video_feeder/tests
-node --test dashboard/
+node --test dashboard/viewmodel.test.js
 # Supabase Edge Functions (Deno) + DB 마이그레이션 (Docker)
 cd supabase/functions && deno fmt --check && deno lint && deno test --allow-env tests/ && cd -
 sh supabase/tests/run_migration_tests.sh

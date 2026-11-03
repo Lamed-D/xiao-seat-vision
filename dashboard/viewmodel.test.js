@@ -1,4 +1,4 @@
-// node --test dashboard/
+// node --test dashboard/viewmodel.test.js
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { buildViewModel } = require("./viewmodel.js");
