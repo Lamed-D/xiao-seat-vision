@@ -1,0 +1,10 @@
+# Keep LF for files executed/read inside Linux containers or CI, even on Windows checkouts.
+* text=auto
+*.sh text eol=lf
+mqtt/mosquitto.conf text eol=lf
+mqtt/acl text eol=lf
+compose.yaml text eol=lf
+**/Dockerfile text eol=lf
+*.zip binary
+*.jpg binary
+*.mp4 binary

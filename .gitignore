@@ -1,0 +1,49 @@
+# ---- secrets / local config (NEVER commit) ----
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+!**/.env.example
+firmware/xiao_seat_vision/config.h
+supabase/.env*
+!supabase/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+mqtt/certs/
+mqtt/secrets/
+service-role*.txt
+
+# ---- Arduino / build output ----
+firmware/**/build/
+firmware/xiao_seat_vision/*.bin
+firmware/xiao_seat_vision/*.elf
+firmware/xiao_seat_vision/*.map
+*.o
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+bridge/data/
+*.egg-info/
+
+# ---- Node / Deno / Supabase local ----
+node_modules/
+supabase/.branches/
+supabase/.temp/
+
+# ---- test videos (large, possibly personal footage) ----
+test-videos/*
+!test-videos/README.md
+!test-videos/*.labels.csv
+
+# ---- editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
