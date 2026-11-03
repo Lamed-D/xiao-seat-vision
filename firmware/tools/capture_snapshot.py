@@ -16,10 +16,14 @@ from __future__ import annotations
 import argparse
 import base64
 import time
+import sys
 from pathlib import Path
 from typing import Callable
 
-import serial  # pyserial
+try:
+    import serial  # pyserial
+except ModuleNotFoundError:
+    sys.exit("pyserial is not installed for this Python. Run:  python -m pip install pyserial")
 
 
 def capture(

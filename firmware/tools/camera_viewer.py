@@ -24,9 +24,13 @@ import threading
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
 from pathlib import Path
 
-import serial  # pyserial
+try:
+    import serial  # pyserial
+except ModuleNotFoundError:
+    sys.exit("pyserial is not installed for this Python. Run:  python -m pip install pyserial")
 
 from capture_snapshot import capture
 
